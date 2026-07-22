@@ -56,6 +56,11 @@ function readStr(row: Record<string, unknown> | null, keys: string[]): string {
   }
   return "";
 }
+// Só aceita link se for URL de verdade. Boleto PAGO/BAIXADO faz o SGA devolver um TEXTO de erro
+// no campo link_boleto ("Não foi possível...") — não é link, então vira null (esconde o botão PDF).
+function urlOnly(s: string): string | null {
+  return /^https?:\/\//i.test(s) ? s : null;
+}
 function asArray(data: unknown): Record<string, unknown>[] {
   if (Array.isArray(data)) return data as Record<string, unknown>[];
   if (data && typeof data === "object") {
@@ -169,7 +174,7 @@ function pickFatura(row: Record<string, unknown>): Fatura {
     situacao: readStr(row, ["descricao_situacao_boleto", "situacao_boleto", "status"]) || null,
     pago,
     linhaDigitavel: readStr(row, ["linha_digitavel"]) || null,
-    linkBoleto: readStr(row, ["link_boleto"]) || null,
+    linkBoleto: urlOnly(readStr(row, ["link_boleto"])),
     pixCopiaCola: readStr(pix, ["copia_cola", "copiaCola"]) || null,
   };
 }

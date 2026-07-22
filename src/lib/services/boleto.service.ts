@@ -34,7 +34,7 @@ async function porPlaca(
   // Se não temos dados do associado (busca só por placa), tenta enriquecer best-effort.
   const info = assoc ?? (await buscarVeiculoPorPlaca(p));
 
-  const { faturas, debug } = await listarUltimasFaturas(p, info?.codigo ?? null, 3);
+  const { faturas } = await listarUltimasFaturas(p, info?.codigo ?? null, 3);
   if (faturas.length) {
     // A listagem nem sempre traz o link do PDF (link_boleto) — enriquece cada fatura pelo
     // endpoint de boleto individual (traz linha digitável + link PDF + PIX numa chamada).
@@ -65,8 +65,7 @@ async function porPlaca(
   if (recorrenteProvavel) {
     return { result: "recorrente", associadoNome: info?.nome ?? null, codigo: info?.codigo ?? null, placa: p, mensagem: MSG_RECORRENTE };
   }
-  // TEMP DEBUG (Fase A): anexa o que cada endpoint de listagem retornou, pra diagnosticar.
-  return { result: "nao_encontrado", motivo: "sem_faturas", debug };
+  return { result: "nao_encontrado", motivo: "sem_faturas" };
 }
 
 /** Consulta por CPF e/ou placa (basta um). */

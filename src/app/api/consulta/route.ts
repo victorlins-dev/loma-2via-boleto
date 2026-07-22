@@ -100,11 +100,6 @@ export async function POST(req: NextRequest) {
     } catch {
       /* auditoria do erro é best-effort */
     }
-    // TEMP DEBUG (Fase A, só admin testando): expõe o detalhe do erro pra diagnosticar.
-    // ⚠️ REMOVER antes de abrir pros executivos.
-    return NextResponse.json(
-      { error: "falha ao consultar", detail: err instanceof Error ? err.message : String(err) },
-      { status: 502 },
-    );
+    return NextResponse.json({ error: "falha ao consultar" }, { status: 502 });
   }
 }
