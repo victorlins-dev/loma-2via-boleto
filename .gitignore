@@ -10,3 +10,6 @@ dist/
 .vercel
 drizzle/.snapshot
 coverage/
+
+# build artifacts
+*.tsbuildinfo
