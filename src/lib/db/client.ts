@@ -11,6 +11,7 @@ import * as schema from "./schema";
 
 const url = process.env.DATABASE_URL;
 export const hasDb = !!url;
-const client = url ? postgres(url, { prepare: false }) : null;
+// prepare:false = exigência do pooler transaction; ssl:"require" = o pooler do Supabase exige SSL.
+const client = url ? postgres(url, { prepare: false, ssl: "require" }) : null;
 export const db = client ? drizzle(client, { schema }) : null;
 export { schema };
