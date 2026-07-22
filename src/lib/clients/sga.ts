@@ -275,6 +275,45 @@ export async function situacaoFinanceiraVeiculo(
   };
 }
 
+export type Evento = {
+  protocolo: string | null;
+  data: string | null; // ISO (data_evento)
+  situacao: string | null; // situacao_evento (texto)
+  descricao: string | null; // área/tipo do evento
+  motivo: string | null;
+  codigoSituacao: string | null;
+};
+
+// Palavras que indicam evento ENCERRADO (não-aberto). A doc SGA não expõe um flag
+// aberto/fechado; filtramos por essas palavras na descrição da situação. ⚠️ Lista a
+// CALIBRAR com os nomes reais das situações da Loma (validar ao vivo).
+const EVENTO_ENCERRADO = /(FINALIZ|ENCERR|CANCEL|INDEFER|ARQUIV|CONCLU|QUITAD|NEGAD|REPROV|PAGO|BAIXAD)/;
+
+/** true se o evento parece estar EM ABERTO (sem situação → tratado como aberto, não esconde). */
+export function eventoEmAberto(situacao: string | null): boolean {
+  if (!situacao) return true;
+  return !EVENTO_ENCERRADO.test(normalizeText(situacao));
+}
+
+/** Eventos (sinistros/acionamentos) de um veículo por placa ou código.
+ *  Doc SGA: GET listar/evento-veiculo/:placa_ou_codigo → { eventos: [...] }. */
+export async function listarEventosVeiculo(placaOuCodigo: string): Promise<Evento[]> {
+  const key = String(placaOuCodigo).replace(/\s/g, "").toUpperCase();
+  if (!key) return [];
+  const data = await authed("get", `/listar/evento-veiculo/${key}`);
+  const arr = Array.isArray(data)
+    ? (data as Record<string, unknown>[])
+    : ((data as { eventos?: unknown } | null)?.eventos as Record<string, unknown>[] | undefined) ?? [];
+  return arr.map((row) => ({
+    protocolo: readStr(row, ["protocolo", "codigo_evento"]) || null,
+    data: readStr(row, ["data_evento", "data_cadastro_evento"]) || null,
+    situacao: readStr(row, ["situacao_evento", "descricao_situacao_evento"]) || null,
+    descricao: readStr(row, ["descricao_evento_area", "descricao_evento"]) || null,
+    motivo: readStr(row, ["descricao_motivo"]) || null,
+    codigoSituacao: readStr(row, ["codigo_situacao_evento"]) || null,
+  }));
+}
+
 /** 2ª via completa de um boleto por nosso_numero (linha digitável + link PDF + PIX) — numa chamada. */
 export async function buscarBoleto(nossoNumero: string): Promise<Fatura | null> {
   const nn = String(nossoNumero).replace(/\D/g, "");

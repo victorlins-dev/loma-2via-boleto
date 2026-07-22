@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
-import { Search, Download, Copy, Check, Loader2, AlertCircle, CreditCard, FileText, Car, ChevronRight, ShieldCheck, ShieldAlert, Wallet } from "lucide-react";
+import { Search, Download, Copy, Check, Loader2, AlertCircle, CreditCard, FileText, Car, ChevronRight, ShieldCheck, ShieldAlert, Wallet, Siren } from "lucide-react";
 
 type Fatura = {
   nossoNumero: string | null;
@@ -20,10 +20,18 @@ type Fatura = {
 };
 type PlacaOpcao = { placa: string; modelo: string | null; situacao: string };
 type SituacaoInfo = { associado: string | null; financeira: string | null };
+type Evento = {
+  protocolo: string | null;
+  data: string | null;
+  situacao: string | null;
+  descricao: string | null;
+  motivo: string | null;
+  codigoSituacao: string | null;
+};
 type Resultado =
-  | { result: "ok"; associadoNome: string | null; codigo: string | null; placa: string; modelo: string | null; situacao: SituacaoInfo; faturas: Fatura[] }
+  | { result: "ok"; associadoNome: string | null; codigo: string | null; placa: string; modelo: string | null; situacao: SituacaoInfo; eventos: Evento[]; faturas: Fatura[] }
   | { result: "selecionar_placa"; associadoNome: string | null; codigo: string | null; veiculos: PlacaOpcao[] }
-  | { result: "recorrente"; associadoNome: string | null; codigo: string | null; placa: string; situacao: SituacaoInfo; mensagem: string }
+  | { result: "recorrente"; associadoNome: string | null; codigo: string | null; placa: string; situacao: SituacaoInfo; eventos: Evento[]; mensagem: string }
   | { result: "nao_encontrado"; motivo: "associado" | "placa" | "sem_faturas" };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -239,11 +247,14 @@ export default function Home() {
           {res && (
             <div className="mt-6 animate-fade-in space-y-3">
               {(res.result === "ok" || res.result === "recorrente") && (
-                <SituacaoCard
-                  nome={res.associadoNome}
-                  placa={res.result === "ok" ? `${res.modelo ? `${res.modelo} · ` : ""}${res.placa}` : res.placa}
-                  situacao={res.situacao}
-                />
+                <>
+                  <SituacaoCard
+                    nome={res.associadoNome}
+                    placa={res.result === "ok" ? `${res.modelo ? `${res.modelo} · ` : ""}${res.placa}` : res.placa}
+                    situacao={res.situacao}
+                  />
+                  <EventosCard eventos={res.eventos} />
+                </>
               )}
 
               {res.result === "selecionar_placa" && (
@@ -369,6 +380,41 @@ function SituacaoCard({
               </span>
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Eventos EM ABERTO do veículo (sinistros/acionamentos) — pedido do Luan. Só consulta.
+function EventosCard({ eventos }: { eventos: Evento[] }) {
+  return (
+    <div className="bg-white rounded-2xl shadow-sm p-5">
+      <div className="flex items-center gap-2 mb-3">
+        <Siren className="w-4 h-4 text-secondary" />
+        <span className="text-xs text-gray uppercase tracking-widest font-semibold">Eventos em aberto</span>
+      </div>
+      {eventos.length === 0 ? (
+        <p className="text-sm text-gray">Nenhum evento em aberto para este veículo.</p>
+      ) : (
+        <div className="space-y-3">
+          {eventos.map((e, i) => (
+            <div key={e.protocolo || i} className="border border-gray-light rounded-xl p-3">
+              <div className="flex items-baseline justify-between gap-3">
+                <p className="font-bold text-graphite">
+                  {e.descricao || "Evento"}
+                  {e.protocolo ? <span className="text-gray font-normal"> · nº {e.protocolo}</span> : null}
+                </p>
+                <p className="text-xs text-gray shrink-0">{fmtData(e.data)}</p>
+              </div>
+              {e.motivo && <p className="text-sm text-gray-text mt-0.5">{e.motivo}</p>}
+              {e.situacao && (
+                <span className="inline-block mt-2 text-xs font-semibold px-2.5 py-1 rounded-full bg-secondary/10 text-secondary">
+                  {e.situacao}
+                </span>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>

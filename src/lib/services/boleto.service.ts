@@ -11,18 +11,24 @@ import {
   buscarBoleto,
   buscarSituacaoAssociado,
   listarUltimasFaturas,
+  listarEventosVeiculo,
+  eventoEmAberto,
   situacaoFinanceiraVeiculo,
   type Fatura,
+  type Evento,
 } from "@/lib/clients/sga";
 
+export type { Evento } from "@/lib/clients/sga";
 export type PlacaOpcao = { placa: string; modelo: string | null; situacao: string };
 // Situação consolidada do associado (pedido do Luan 22/07): ativo/inativo + em dia/inadimplente.
 export type SituacaoInfo = { associado: string | null; financeira: string | null };
 export type ConsultaResult =
-  | { result: "ok"; associadoNome: string | null; codigo: string | null; placa: string; modelo: string | null; situacao: SituacaoInfo; faturas: Fatura[] }
+  | { result: "ok"; associadoNome: string | null; codigo: string | null; placa: string; modelo: string | null; situacao: SituacaoInfo; eventos: Evento[]; faturas: Fatura[] }
   | { result: "selecionar_placa"; associadoNome: string | null; codigo: string | null; veiculos: PlacaOpcao[] }
-  | { result: "recorrente"; associadoNome: string | null; codigo: string | null; placa: string; situacao: SituacaoInfo; mensagem: string }
+  | { result: "recorrente"; associadoNome: string | null; codigo: string | null; placa: string; situacao: SituacaoInfo; eventos: Evento[]; mensagem: string }
   | { result: "nao_encontrado"; motivo: "associado" | "placa" | "sem_faturas"; debug?: unknown };
+
+const MAX_EVENTOS = 5;
 
 const MSG_RECORRENTE =
   "Este veículo está em cobrança recorrente no cartão — não há boleto para 2ª via. " +
@@ -41,14 +47,20 @@ async function porPlaca(
   // Situação do associado (ativo/inativo) + financeira (em dia/inadimplente), em paralelo.
   // O CPF pode vir do executivo, do CPF já resolvido, ou do próprio lookup da placa.
   const cpfUse = (cpf || info?.cpf || "").replace(/\D/g, "");
-  const [sitAssoc, sf] = await Promise.all([
+  const [sitAssoc, sf, eventosAll] = await Promise.all([
     cpfUse.length >= 11 ? buscarSituacaoAssociado(cpfUse) : Promise.resolve(null),
     situacaoFinanceiraVeiculo(p),
+    listarEventosVeiculo(p).catch(() => [] as Evento[]),
   ]);
   const situacao: SituacaoInfo = {
     associado: sitAssoc?.descricao ?? null,
     financeira: sf?.situacao ?? null,
   };
+  // Só os eventos EM ABERTO (pedido do Luan: "abertos + situação"), mais recentes primeiro.
+  const eventos = eventosAll
+    .filter((e) => eventoEmAberto(e.situacao))
+    .sort((a, b) => (b.data || "").localeCompare(a.data || ""))
+    .slice(0, MAX_EVENTOS);
 
   const { faturas } = await listarUltimasFaturas(p, info?.codigo ?? null, 3);
   if (faturas.length) {
@@ -71,6 +83,7 @@ async function porPlaca(
       placa: p,
       modelo: info?.modelo ?? null,
       situacao,
+      eventos,
       faturas,
     };
   }
@@ -79,7 +92,7 @@ async function porPlaca(
   const inadimplente = (sf?.situacao || "").toUpperCase().includes("INADIMPL");
   const recorrenteProvavel = !!sf && (inadimplente || !sf.nossoNumero);
   if (recorrenteProvavel) {
-    return { result: "recorrente", associadoNome: info?.nome ?? null, codigo: info?.codigo ?? null, placa: p, situacao, mensagem: MSG_RECORRENTE };
+    return { result: "recorrente", associadoNome: info?.nome ?? null, codigo: info?.codigo ?? null, placa: p, situacao, eventos, mensagem: MSG_RECORRENTE };
   }
   return { result: "nao_encontrado", motivo: "sem_faturas" };
 }
