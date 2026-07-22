@@ -1,0 +1,32 @@
+{
+  "name": "loma-2via-boleto",
+  "version": "0.1.0",
+  "private": true,
+  "description": "App de 2a via de boleto para executivos (popup Bitrix24) com auditoria de consultas.",
+  "scripts": {
+    "dev": "next dev -p 3005",
+    "build": "next build",
+    "start": "next start -p 3005",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "axios": "^1.7.9",
+    "drizzle-orm": "^0.38.0",
+    "postgres": "^3.4.5",
+    "lucide-react": "^0.469.0",
+    "clsx": "^2.1.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "tailwindcss": "^4.0.0",
+    "@tailwindcss/postcss": "^4.0.0"
+  }
+}

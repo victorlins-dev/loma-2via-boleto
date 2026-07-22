@@ -1,0 +1,3 @@
+-- OBSOLETO — o setup do banco agora é o Supabase. Rode: drizzle/supabase-setup.sql
+-- (versão antiga baseada em Neon + role app_boleto + RLS foi substituída pela imutabilidade
+--  por trigger, que vale pra qualquer role — ver supabase-setup.sql).

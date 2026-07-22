@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+/* Tokens copiados do app de cotação da Loma (quote-web-from-crm/globals.css) — MESMA identidade.
+   Teal da marca = #00bcb6; CTA amarelo = #FAB600; cantos bem arredondados; tema claro fixo. */
+@theme {
+  --color-primary: #00bcb6;
+  --color-hoved: #2e9c8f;
+  --color-third: #fab600;
+  --color-secondary: #7a4595;
+
+  --color-graphite: #282828;
+  --color-gray-text: #3c3c3c;
+  --color-gray: #919191;
+  --color-gray-light: #d1d5db;
+  --color-gray-soft: #f3f3f3;
+  --color-gray-input: #e7eef5;
+  --color-background: #e2e2e2;
+
+  --color-red: #ee1d2c;
+  --color-red-soft: #ffa1a1;
+  --color-green: #3cd07a;
+
+  --font-sans: var(--font-poppins), ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  background-color: #f9fafb; /* gray-50, igual à cotação */
+  color: #282828; /* graphite */
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in { animation: fade-in 0.3s ease both; }
