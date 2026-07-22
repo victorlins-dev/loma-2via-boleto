@@ -24,28 +24,12 @@ export default function Install() {
         setMsg("Abra esta página dentro do Bitrix (instalação do aplicativo).");
         return;
       }
+      // O item de menu é criado pelo próprio cadastro do app local ("Texto do item de menu").
+      // Aqui só finalizamos a instalação (gera o application_token e libera o app).
       BX24.init(() => {
-        BX24.callMethod(
-          "placement.bind",
-          {
-            PLACEMENT: "LEFT_MENU",
-            HANDLER: `${window.location.origin}/`,
-            TITLE: "2ª via de boleto",
-          },
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (res: any) => {
-            const err = res?.error?.();
-            // Se já estava vinculado, o Bitrix retorna erro — tratamos como OK (idempotente).
-            if (err && !String(err).toUpperCase().includes("EXIST") && !String(err).toUpperCase().includes("HANDLER_ALREADY")) {
-              setEstado("erro");
-              setMsg(`Não foi possível registrar o menu: ${err}`);
-              return;
-            }
-            try { BX24.installFinish(); } catch {}
-            setEstado("ok");
-            setMsg("Aplicativo instalado. O item “2ª via de boleto” já aparece no menu lateral.");
-          },
-        );
+        try { BX24.installFinish(); } catch {}
+        setEstado("ok");
+        setMsg("Aplicativo instalado. Abra “2ª via de boleto” no menu à esquerda.");
       });
     } catch {
       setEstado("erro");
