@@ -350,18 +350,24 @@ function SituacaoCard({
         <p className="text-xs text-gray uppercase tracking-wider text-right shrink-0">{placa}</p>
       </div>
       {(situacao.associado || situacao.financeira) && (
-        <div className="flex flex-wrap gap-2 mt-3">
+        <div className="flex flex-wrap gap-x-8 gap-y-3 mt-3">
           {situacao.associado && (
-            <span className={`inline-flex items-center gap-1.5 text-sm font-semibold px-3 py-1.5 rounded-full ${cor(tomAssoc)}`}>
-              {tomAssoc === "ruim" ? <ShieldAlert className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
-              {situacao.associado}
-            </span>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-gray uppercase tracking-wider">Situação do associado</span>
+              <span className={`inline-flex items-center gap-1.5 text-sm font-semibold px-3 py-1.5 rounded-full w-fit ${cor(tomAssoc)}`}>
+                {tomAssoc === "ruim" ? <ShieldAlert className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
+                {situacao.associado}
+              </span>
+            </div>
           )}
           {situacao.financeira && (
-            <span className={`inline-flex items-center gap-1.5 text-sm font-semibold px-3 py-1.5 rounded-full ${cor(tomFin)}`}>
-              <Wallet className="w-4 h-4" />
-              {situacao.financeira}
-            </span>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-gray uppercase tracking-wider">Situação financeira</span>
+              <span className={`inline-flex items-center gap-1.5 text-sm font-semibold px-3 py-1.5 rounded-full w-fit ${cor(tomFin)}`}>
+                <Wallet className="w-4 h-4" />
+                {situacao.financeira}
+              </span>
+            </div>
           )}
         </div>
       )}
