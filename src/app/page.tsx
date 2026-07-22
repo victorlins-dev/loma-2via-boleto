@@ -54,6 +54,45 @@ function formatCpf(v: string) {
     .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
 }
 
+// Normaliza data pro padrão BR (DD/MM/AAAA), aceitando ISO (2026-05-10) ou já-BR (10/05/2026).
+function fmtData(s: string | null): string {
+  if (!s) return "—";
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+  const br = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (br) return `${br[1]}/${br[2]}/${br[3]}`;
+  return s;
+}
+
+// Copia texto de forma robusta — dentro do iframe do Bitrix o clipboard moderno costuma ser
+// bloqueado, então caímos pro método antigo (textarea + execCommand), que funciona no iframe.
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* cai no fallback */
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "0";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 export default function Home() {
   const auth = useBitrixAuth();
   const [cpf, setCpf] = useState("");
@@ -84,7 +123,11 @@ export default function Home() {
         setErro("Informe o CPF completo ou a placa.");
         return;
       }
-      if (!placaOverride) setRes(null);
+      if (!placaOverride) {
+        setRes(null);
+        setCpf("");
+        setPlaca(""); // zera os campos ao consultar (pedido do Victor)
+      }
       setLoading(true);
       try {
         const r = await fetch("/api/consulta", {
@@ -123,12 +166,14 @@ export default function Home() {
 
   const copiar = useCallback(
     async (texto: string, id: string, action: string, target: string | null) => {
-      try {
-        await navigator.clipboard.writeText(texto);
+      const ok = await copyText(texto);
+      if (ok) {
         setCopiado(id);
         setTimeout(() => setCopiado(null), 1800);
         registrarAcao(action, target);
-      } catch {}
+      } else {
+        setErro("Não consegui copiar automaticamente — selecione e copie manualmente.");
+      }
     },
     [registrarAcao],
   );
@@ -285,13 +330,14 @@ function FaturaCard({
   target: string | null;
 }) {
   const id = f.nossoNumero || `${f.vencimento}`;
+  const statusLabel = f.pago ? "Pago" : f.situacao || "Em aberto";
   const badge = f.pago ? "bg-green/15 text-green" : "bg-third/15 text-graphite";
   return (
     <div className="bg-white rounded-2xl shadow-sm p-5">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-xs text-gray uppercase tracking-wider">Vencimento</p>
-          <p className="font-bold text-graphite text-lg">{f.vencimento || "—"}</p>
+          <p className="font-bold text-graphite text-lg">{fmtData(f.vencimento)}</p>
         </div>
         <div className="text-right">
           <p className="text-xs text-gray uppercase tracking-wider">Valor</p>
