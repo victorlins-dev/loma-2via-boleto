@@ -9,16 +9,19 @@ import {
   buscarPorCpf,
   buscarVeiculoPorPlaca,
   buscarBoleto,
+  buscarSituacaoAssociado,
   listarUltimasFaturas,
   situacaoFinanceiraVeiculo,
   type Fatura,
 } from "@/lib/clients/sga";
 
 export type PlacaOpcao = { placa: string; modelo: string | null; situacao: string };
+// Situação consolidada do associado (pedido do Luan 22/07): ativo/inativo + em dia/inadimplente.
+export type SituacaoInfo = { associado: string | null; financeira: string | null };
 export type ConsultaResult =
-  | { result: "ok"; associadoNome: string | null; codigo: string | null; placa: string; modelo: string | null; faturas: Fatura[] }
+  | { result: "ok"; associadoNome: string | null; codigo: string | null; placa: string; modelo: string | null; situacao: SituacaoInfo; faturas: Fatura[] }
   | { result: "selecionar_placa"; associadoNome: string | null; codigo: string | null; veiculos: PlacaOpcao[] }
-  | { result: "recorrente"; associadoNome: string | null; codigo: string | null; placa: string; mensagem: string }
+  | { result: "recorrente"; associadoNome: string | null; codigo: string | null; placa: string; situacao: SituacaoInfo; mensagem: string }
   | { result: "nao_encontrado"; motivo: "associado" | "placa" | "sem_faturas"; debug?: unknown };
 
 const MSG_RECORRENTE =
@@ -28,11 +31,24 @@ const MSG_RECORRENTE =
 /** Lista as 3 últimas faturas de uma placa; ramifica pra recorrente/não-encontrado se vazio. */
 async function porPlaca(
   placa: string,
-  assoc?: { nome: string | null; codigo: string | null; modelo: string | null },
+  assoc?: { nome: string | null; codigo: string | null; modelo: string | null; cpf?: string | null },
+  cpf?: string,
 ): Promise<ConsultaResult> {
   const p = placa.replace(/\s/g, "").toUpperCase();
   // Se não temos dados do associado (busca só por placa), tenta enriquecer best-effort.
   const info = assoc ?? (await buscarVeiculoPorPlaca(p));
+
+  // Situação do associado (ativo/inativo) + financeira (em dia/inadimplente), em paralelo.
+  // O CPF pode vir do executivo, do CPF já resolvido, ou do próprio lookup da placa.
+  const cpfUse = (cpf || info?.cpf || "").replace(/\D/g, "");
+  const [sitAssoc, sf] = await Promise.all([
+    cpfUse.length >= 11 ? buscarSituacaoAssociado(cpfUse) : Promise.resolve(null),
+    situacaoFinanceiraVeiculo(p),
+  ]);
+  const situacao: SituacaoInfo = {
+    associado: sitAssoc?.descricao ?? null,
+    financeira: sf?.situacao ?? null,
+  };
 
   const { faturas } = await listarUltimasFaturas(p, info?.codigo ?? null, 3);
   if (faturas.length) {
@@ -54,16 +70,16 @@ async function porPlaca(
       codigo: info?.codigo ?? null,
       placa: p,
       modelo: info?.modelo ?? null,
+      situacao,
       faturas,
     };
   }
 
-  // Sem boleto → pode ser cartão/recorrente. Confirma pela situação financeira do veículo.
-  const sf = await situacaoFinanceiraVeiculo(p);
+  // Sem boleto → pode ser cartão/recorrente. Usa a situação financeira já buscada acima.
   const inadimplente = (sf?.situacao || "").toUpperCase().includes("INADIMPL");
   const recorrenteProvavel = !!sf && (inadimplente || !sf.nossoNumero);
   if (recorrenteProvavel) {
-    return { result: "recorrente", associadoNome: info?.nome ?? null, codigo: info?.codigo ?? null, placa: p, mensagem: MSG_RECORRENTE };
+    return { result: "recorrente", associadoNome: info?.nome ?? null, codigo: info?.codigo ?? null, placa: p, situacao, mensagem: MSG_RECORRENTE };
   }
   return { result: "nao_encontrado", motivo: "sem_faturas" };
 }
@@ -78,7 +94,11 @@ export async function consultarFaturas(cpf?: string, placa?: string): Promise<Co
     if (cpfDigits.length === 11) {
       const assoc = await buscarPorCpf(cpfDigits);
       const v = assoc?.veiculos.find((x) => x.placa === placaNorm);
-      return porPlaca(placaNorm, assoc ? { nome: assoc.nome, codigo: assoc.codigo, modelo: v?.modelo ?? null } : undefined);
+      return porPlaca(
+        placaNorm,
+        assoc ? { nome: assoc.nome, codigo: assoc.codigo, modelo: v?.modelo ?? null, cpf: assoc.cpf } : undefined,
+        cpfDigits,
+      );
     }
     return porPlaca(placaNorm);
   }
@@ -90,7 +110,11 @@ export async function consultarFaturas(cpf?: string, placa?: string): Promise<Co
     const veiculos = assoc.veiculos;
     if (veiculos.length === 0) return { result: "nao_encontrado", motivo: "placa" };
     if (veiculos.length === 1) {
-      return porPlaca(veiculos[0].placa, { nome: assoc.nome, codigo: assoc.codigo, modelo: veiculos[0].modelo });
+      return porPlaca(
+        veiculos[0].placa,
+        { nome: assoc.nome, codigo: assoc.codigo, modelo: veiculos[0].modelo, cpf: assoc.cpf },
+        cpfDigits,
+      );
     }
     // Vários veículos → o front mostra o seletor de placa.
     return {

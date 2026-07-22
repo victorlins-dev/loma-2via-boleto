@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
-import { Search, Download, Copy, Check, Loader2, AlertCircle, CreditCard, FileText, Car, ChevronRight } from "lucide-react";
+import { Search, Download, Copy, Check, Loader2, AlertCircle, CreditCard, FileText, Car, ChevronRight, ShieldCheck, ShieldAlert, Wallet } from "lucide-react";
 
 type Fatura = {
   nossoNumero: string | null;
@@ -19,10 +19,11 @@ type Fatura = {
   pixCopiaCola: string | null;
 };
 type PlacaOpcao = { placa: string; modelo: string | null; situacao: string };
+type SituacaoInfo = { associado: string | null; financeira: string | null };
 type Resultado =
-  | { result: "ok"; associadoNome: string | null; codigo: string | null; placa: string; modelo: string | null; faturas: Fatura[] }
+  | { result: "ok"; associadoNome: string | null; codigo: string | null; placa: string; modelo: string | null; situacao: SituacaoInfo; faturas: Fatura[] }
   | { result: "selecionar_placa"; associadoNome: string | null; codigo: string | null; veiculos: PlacaOpcao[] }
-  | { result: "recorrente"; associadoNome: string | null; codigo: string | null; placa: string; mensagem: string }
+  | { result: "recorrente"; associadoNome: string | null; codigo: string | null; placa: string; situacao: SituacaoInfo; mensagem: string }
   | { result: "nao_encontrado"; motivo: "associado" | "placa" | "sem_faturas" };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -237,6 +238,14 @@ export default function Home() {
 
           {res && (
             <div className="mt-6 animate-fade-in space-y-3">
+              {(res.result === "ok" || res.result === "recorrente") && (
+                <SituacaoCard
+                  nome={res.associadoNome}
+                  placa={res.result === "ok" ? `${res.modelo ? `${res.modelo} · ` : ""}${res.placa}` : res.placa}
+                  situacao={res.situacao}
+                />
+              )}
+
               {res.result === "selecionar_placa" && (
                 <>
                   <div className="px-1">
@@ -265,13 +274,6 @@ export default function Home() {
 
               {res.result === "ok" && (
                 <>
-                  <div className="flex items-baseline justify-between px-1">
-                    <p className="font-semibold text-graphite">{res.associadoNome || "Associado"}</p>
-                    <p className="text-xs text-gray uppercase tracking-wider">
-                      {res.modelo ? `${res.modelo} · ` : ""}
-                      {res.placa}
-                    </p>
-                  </div>
                   {res.faturas.map((f, i) => (
                     <FaturaCard
                       key={f.nossoNumero || i}
@@ -312,6 +314,57 @@ export default function Home() {
           )}
         </div>
       </main>
+    </div>
+  );
+}
+
+// Pílula de status: verde = bom (ativo/em dia), vermelho = atenção (inativo/inadimplente),
+// cinza = desconhecido. Interpreta o texto cru que o SGA devolve.
+function statusTom(texto: string | null, tipo: "associado" | "financeira"): "bom" | "ruim" | "neutro" {
+  if (!texto) return "neutro";
+  const t = texto.toUpperCase();
+  if (tipo === "associado") return t.includes("ATIVO") && !t.includes("INATIVO") ? "bom" : "ruim";
+  // financeira: inadimplente/atraso = ruim; em dia/adimplente/regular = bom.
+  if (t.includes("INADIMPL") || t.includes("ATRAS") || t.includes("PENDEN")) return "ruim";
+  if (t.includes("DIA") || t.includes("ADIMPL") || t.includes("REGULAR") || t.includes("QUITAD")) return "bom";
+  return "neutro";
+}
+
+function SituacaoCard({
+  nome,
+  placa,
+  situacao,
+}: {
+  nome: string | null;
+  placa: string;
+  situacao: SituacaoInfo;
+}) {
+  const tomAssoc = statusTom(situacao.associado, "associado");
+  const tomFin = statusTom(situacao.financeira, "financeira");
+  const cor = (tom: "bom" | "ruim" | "neutro") =>
+    tom === "bom" ? "bg-green/15 text-green" : tom === "ruim" ? "bg-red/15 text-red" : "bg-gray-soft text-gray-text";
+  return (
+    <div className="bg-white rounded-2xl shadow-sm p-5">
+      <div className="flex items-baseline justify-between gap-3">
+        <p className="font-bold text-graphite text-lg">{nome || "Associado"}</p>
+        <p className="text-xs text-gray uppercase tracking-wider text-right shrink-0">{placa}</p>
+      </div>
+      {(situacao.associado || situacao.financeira) && (
+        <div className="flex flex-wrap gap-2 mt-3">
+          {situacao.associado && (
+            <span className={`inline-flex items-center gap-1.5 text-sm font-semibold px-3 py-1.5 rounded-full ${cor(tomAssoc)}`}>
+              {tomAssoc === "ruim" ? <ShieldAlert className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
+              {situacao.associado}
+            </span>
+          )}
+          {situacao.financeira && (
+            <span className={`inline-flex items-center gap-1.5 text-sm font-semibold px-3 py-1.5 rounded-full ${cor(tomFin)}`}>
+              <Wallet className="w-4 h-4" />
+              {situacao.financeira}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

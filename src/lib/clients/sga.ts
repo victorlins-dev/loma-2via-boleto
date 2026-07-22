@@ -147,11 +147,12 @@ export async function buscarPorCpf(cpf: string): Promise<Associado | null> {
   return arr.length ? pickAssociado(arr[0]) : null;
 }
 
-/** Detalhe do veículo por placa (best-effort: nome/código do associado + modelo).
- *  Usado quando o executivo pesquisa SÓ por placa (sem CPF). */
+/** Detalhe do veículo por placa (best-effort: nome/código/CPF do associado + modelo).
+ *  Usado quando o executivo pesquisa SÓ por placa (sem CPF) — o CPF daqui permite
+ *  buscar a situação do associado mesmo sem o executivo digitar o CPF. */
 export async function buscarVeiculoPorPlaca(
   placa: string,
-): Promise<{ nome: string | null; codigo: string | null; modelo: string | null } | null> {
+): Promise<{ nome: string | null; codigo: string | null; modelo: string | null; cpf: string | null } | null> {
   const p = String(placa).replace(/\s/g, "").toUpperCase();
   const data = await authed("get", `/veiculo/buscar/${p}/placa`);
   const rec = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null;
@@ -160,6 +161,22 @@ export async function buscarVeiculoPorPlaca(
     nome: readStr(rec, ["nome_associado", "nome"]) || null,
     codigo: readStr(rec, ["codigo_associado", "codigo"]) || null,
     modelo: modeloSimples(readStr(rec, ["descricao_modelo", "modelo"])),
+    cpf: readStr(rec, ["cpf_associado", "cpf"]).replace(/\D/g, "") || null,
+  };
+}
+
+/** Situação do associado (ATIVO/INATIVO) por CPF ou CNPJ.
+ *  Doc SGA: GET buscar/situacao-associado/:cpfOuCnpj → { codigo_situacao, descricao }. */
+export type SituacaoAssociado = { codigoSituacao: string | null; descricao: string | null };
+export async function buscarSituacaoAssociado(cpfOuCnpj: string): Promise<SituacaoAssociado | null> {
+  const d = String(cpfOuCnpj).replace(/\D/g, "");
+  if (!d) return null;
+  const data = await authed("get", `/buscar/situacao-associado/${d}`);
+  const rec = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null;
+  if (!rec) return null;
+  return {
+    codigoSituacao: readStr(rec, ["codigo_situacao"]) || null,
+    descricao: readStr(rec, ["descricao", "descricao_situacao"]) || null,
   };
 }
 
