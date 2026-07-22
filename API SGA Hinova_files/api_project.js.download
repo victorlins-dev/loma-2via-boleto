@@ -1,0 +1,34 @@
+define({
+  "name": "{API SGA}",
+  "version": "2.0.0",
+  "description": "API de integração com sistema SGA Hinova Soluções Digitais<br />Endpoint: https://api.hinova.com.br/api/sga/v2",
+  "title": "API SGA Hinova",
+  "apidoc": "0.3.0",
+  "sampleUrl": null,
+  "order": [
+    "Autenticacao",
+    "Associado",
+    "Atendimento",
+    "Beneficiario",
+    "Beneficio",
+    "Boleto",
+    "Cooperativa",
+    "Cota",
+    "Evento",
+    "Fornecedor",
+    "Produto",
+    "Regional",
+    "Termo",
+    "Veiculo",
+    "Vistoria",
+    "Voluntario",
+    "MGF"
+  ],
+  "defaultVersion": "0.0.0",
+  "generator": {
+    "name": "apidoc",
+    "time": "2021-08-09T13:13:51.378Z",
+    "url": "http://apidocjs.com",
+    "version": "0.17.7"
+  }
+});

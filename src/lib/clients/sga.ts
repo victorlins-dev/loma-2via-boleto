@@ -186,48 +186,51 @@ export type ListagemBoletos = {
   debug: { attempts: { via: string; n: number }[]; sampleKeys: string[] };
 };
 
-/** As N últimas faturas (histórico), mais recentes primeiro. Tenta as VARIAÇÕES de endpoint do SGA
- *  (por placa, e por código do associado) porque a listagem varia por conta; usa a 1ª que retornar
- *  linhas. Janela larga (18 meses → +30d). Devolve também um diagnóstico do que cada tentativa trouxe. */
+/** As N últimas faturas (histórico), mais recentes primeiro.
+ *  ⚠️ O endpoint /listar/boleto-associado-veiculo tem LIMITE DE 90 DIAS por intervalo (doc oficial).
+ *  Por isso varremos em JANELAS de ~90 dias andando pra trás (até ~18 meses), acumulando, até ter as
+ *  N mais recentes. `link_boleto: true` traz o link do PDF na própria listagem. */
 export async function listarUltimasFaturas(
   placa: string,
   codigo: string | null,
   n = 3,
 ): Promise<ListagemBoletos> {
   const p = String(placa).replace(/\s/g, "").toUpperCase();
-  const now = new Date();
-  const ini = fmtBr(new Date(now.getTime() - 548 * 864e5));
-  const fim = fmtBr(new Date(now.getTime() + 30 * 864e5));
+  const DAY = 864e5;
   const attempts: { via: string; n: number }[] = [];
+  const acc = new Map<string, Record<string, unknown>>();
 
-  const tryPost = async (via: string, path: string, body: unknown) => {
-    try {
-      const d = await authed("post", path, body);
-      const a = asArray(d);
-      attempts.push({ via, n: a.length });
-      return a;
-    } catch {
-      attempts.push({ via: `${via}_ERR`, n: -1 });
-      return [] as Record<string, unknown>[];
+  const varrer = async (ident: Record<string, unknown>, tag: string) => {
+    for (let i = 0; i < 6 && acc.size < n; i++) {
+      const fim = new Date(Date.now() - i * 90 * DAY + 3 * DAY); // +3d no + recente pega o vincendo
+      const ini = new Date(fim.getTime() - 88 * DAY); // 88 dias < limite de 90
+      const body = {
+        ...ident,
+        data_vencimento_inicial: fmtBr(ini),
+        data_vencimento_final: fmtBr(fim),
+        link_boleto: true,
+      };
+      let rows: Record<string, unknown>[] = [];
+      try {
+        rows = asArray(await authed("post", "/listar/boleto-associado-veiculo", body));
+        attempts.push({ via: `${tag}_win${i}`, n: rows.length });
+      } catch {
+        attempts.push({ via: `${tag}_win${i}_ERR`, n: -1 });
+        continue;
+      }
+      for (const r of rows) {
+        const key = String(r.nosso_numero ?? r.codigo_boleto ?? JSON.stringify(r));
+        if (!acc.has(key)) acc.set(key, r);
+      }
     }
   };
 
-  let rows = await tryPost("placa_venc_orig", "/listar/boleto-associado-veiculo", {
-    placa: p, data_vencimento_original_inicial: ini, data_vencimento_original_final: fim,
-  });
-  if (!rows.length && codigo) {
-    rows = await tryPost("codigo_periodo", "/listar/boleto-associado/periodo", {
-      codigo_associado: codigo, data_vencimento_inicial: ini, data_vencimento_final: fim,
-      quantidade_por_pagina: 100, inicio_paginacao: 0,
-    });
-  }
-  if (!rows.length && codigo) {
-    rows = await tryPost("codigo_emissao", "/listar/boleto-associado-veiculo", {
-      codigo_associado: codigo, data_emissao_inicial: ini, data_emissao_final: fim,
-    });
-  }
-  const sampleKeys = rows[0] ? Object.keys(rows[0]) : [];
-  const faturas = rows
+  await varrer({ placa: p }, "placa");
+  if (acc.size === 0 && codigo) await varrer({ codigo_associado: codigo }, "codigo");
+
+  const allRows = [...acc.values()];
+  const sampleKeys = allRows[0] ? Object.keys(allRows[0]) : [];
+  const faturas = allRows
     .map(pickFatura)
     .sort((a, b) => parseBrDate(b.vencimento) - parseBrDate(a.vencimento))
     .slice(0, n);
