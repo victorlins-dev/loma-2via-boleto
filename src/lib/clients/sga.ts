@@ -181,21 +181,57 @@ function parseBrDate(s: string | null): number {
   return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])).getTime();
 }
 
-/** As N últimas faturas de uma PLACA (histórico), mais recentes primeiro.
- *  Janela larga (18 meses atrás → +30d) porque a API não tem ordenação/paginação por "últimas".
- *  Vazio/406 = conta sem boleto (provável recorrente/cartão) → o service ramifica. */
-export async function listarUltimasFaturas(placa: string, n = 3): Promise<Fatura[]> {
+export type ListagemBoletos = {
+  faturas: Fatura[];
+  debug: { attempts: { via: string; n: number }[]; sampleKeys: string[] };
+};
+
+/** As N últimas faturas (histórico), mais recentes primeiro. Tenta as VARIAÇÕES de endpoint do SGA
+ *  (por placa, e por código do associado) porque a listagem varia por conta; usa a 1ª que retornar
+ *  linhas. Janela larga (18 meses → +30d). Devolve também um diagnóstico do que cada tentativa trouxe. */
+export async function listarUltimasFaturas(
+  placa: string,
+  codigo: string | null,
+  n = 3,
+): Promise<ListagemBoletos> {
   const p = String(placa).replace(/\s/g, "").toUpperCase();
   const now = new Date();
-  const body = {
-    placa: p,
-    data_vencimento_original_inicial: fmtBr(new Date(now.getTime() - 548 * 864e5)),
-    data_vencimento_original_final: fmtBr(new Date(now.getTime() + 30 * 864e5)),
+  const ini = fmtBr(new Date(now.getTime() - 548 * 864e5));
+  const fim = fmtBr(new Date(now.getTime() + 30 * 864e5));
+  const attempts: { via: string; n: number }[] = [];
+
+  const tryPost = async (via: string, path: string, body: unknown) => {
+    try {
+      const d = await authed("post", path, body);
+      const a = asArray(d);
+      attempts.push({ via, n: a.length });
+      return a;
+    } catch {
+      attempts.push({ via: `${via}_ERR`, n: -1 });
+      return [] as Record<string, unknown>[];
+    }
   };
-  const data = await authed("post", `/listar/boleto-associado-veiculo`, body);
-  const faturas = asArray(data).map(pickFatura);
-  faturas.sort((a, b) => parseBrDate(b.vencimento) - parseBrDate(a.vencimento));
-  return faturas.slice(0, n);
+
+  let rows = await tryPost("placa_venc_orig", "/listar/boleto-associado-veiculo", {
+    placa: p, data_vencimento_original_inicial: ini, data_vencimento_original_final: fim,
+  });
+  if (!rows.length && codigo) {
+    rows = await tryPost("codigo_periodo", "/listar/boleto-associado/periodo", {
+      codigo_associado: codigo, data_vencimento_inicial: ini, data_vencimento_final: fim,
+      quantidade_por_pagina: 100, inicio_paginacao: 0,
+    });
+  }
+  if (!rows.length && codigo) {
+    rows = await tryPost("codigo_emissao", "/listar/boleto-associado-veiculo", {
+      codigo_associado: codigo, data_emissao_inicial: ini, data_emissao_final: fim,
+    });
+  }
+  const sampleKeys = rows[0] ? Object.keys(rows[0]) : [];
+  const faturas = rows
+    .map(pickFatura)
+    .sort((a, b) => parseBrDate(b.vencimento) - parseBrDate(a.vencimento))
+    .slice(0, n);
+  return { faturas, debug: { attempts, sampleKeys } };
 }
 
 /** Situação financeira do veículo (fonte real da inadimplência) — dá vencimento + nosso_numero do aberto. */

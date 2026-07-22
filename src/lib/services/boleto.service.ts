@@ -18,7 +18,7 @@ export type ConsultaResult =
   | { result: "ok"; associadoNome: string | null; codigo: string | null; placa: string; modelo: string | null; faturas: Fatura[] }
   | { result: "selecionar_placa"; associadoNome: string | null; codigo: string | null; veiculos: PlacaOpcao[] }
   | { result: "recorrente"; associadoNome: string | null; codigo: string | null; placa: string; mensagem: string }
-  | { result: "nao_encontrado"; motivo: "associado" | "placa" | "sem_faturas" };
+  | { result: "nao_encontrado"; motivo: "associado" | "placa" | "sem_faturas"; debug?: unknown };
 
 const MSG_RECORRENTE =
   "Este veículo está em cobrança recorrente no cartão — não há boleto para 2ª via. " +
@@ -33,7 +33,7 @@ async function porPlaca(
   // Se não temos dados do associado (busca só por placa), tenta enriquecer best-effort.
   const info = assoc ?? (await buscarVeiculoPorPlaca(p));
 
-  const faturas = await listarUltimasFaturas(p, 3);
+  const { faturas, debug } = await listarUltimasFaturas(p, info?.codigo ?? null, 3);
   if (faturas.length) {
     return {
       result: "ok",
@@ -52,7 +52,8 @@ async function porPlaca(
   if (recorrenteProvavel) {
     return { result: "recorrente", associadoNome: info?.nome ?? null, codigo: info?.codigo ?? null, placa: p, mensagem: MSG_RECORRENTE };
   }
-  return { result: "nao_encontrado", motivo: "sem_faturas" };
+  // TEMP DEBUG (Fase A): anexa o que cada endpoint de listagem retornou, pra diagnosticar.
+  return { result: "nao_encontrado", motivo: "sem_faturas", debug };
 }
 
 /** Consulta por CPF e/ou placa (basta um). */
