@@ -180,25 +180,25 @@ export default function Home() {
 
   return (
     <div ref={containerRef} className="min-h-screen">
-      <header className="bg-primary sticky top-0 z-50 flex justify-center items-center h-20 shadow-sm">
-        <Image src="/logo.webp" alt="Loma" width={130} height={26} priority />
+      <header className="bg-primary sticky top-0 z-50 flex justify-center items-center h-24 shadow-sm">
+        <Image src="/logo.webp" alt="Loma" width={160} height={32} priority />
       </header>
 
-      <main className="container mx-auto px-4 py-8">
-        <div className="max-w-xl mx-auto">
-          <div className="mb-6">
-            <p className="text-primary font-bold text-xs uppercase tracking-widest">2ª via de boleto</p>
-            <h1 className="text-2xl font-black text-graphite">
+      <main className="container mx-auto px-4 py-10">
+        <div className="max-w-2xl mx-auto">
+          <div className="mb-7">
+            <p className="text-primary font-bold text-sm uppercase tracking-widest">2ª via de boleto</p>
+            <h1 className="text-3xl font-black text-graphite">
               Consultar <span className="text-primary">fatura do associado</span>
             </h1>
-            <p className="text-sm text-gray mt-1">
+            <p className="text-base text-gray mt-1.5">
               Informe o CPF, a placa, ou os dois. Você verá as 3 últimas faturas para baixar ou copiar.
             </p>
           </div>
 
-          <div className="bg-white rounded-2xl shadow-sm p-6 space-y-4">
+          <div className="bg-white rounded-2xl shadow-sm p-7 space-y-5">
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-gray mb-1.5">CPF</label>
+              <label className="block text-sm font-bold uppercase tracking-wider text-gray mb-1.5">CPF</label>
               <input
                 value={cpf}
                 onChange={(e) => setCpf(formatCpf(e.target.value))}
@@ -211,7 +211,7 @@ export default function Home() {
               <span className="flex-1 h-px bg-gray-light" /> e / ou <span className="flex-1 h-px bg-gray-light" />
             </div>
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-gray mb-1.5">Placa</label>
+              <label className="block text-sm font-bold uppercase tracking-wider text-gray mb-1.5">Placa</label>
               <input
                 value={placa}
                 onChange={(e) => setPlaca(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 7))}
@@ -337,11 +337,11 @@ function FaturaCard({
       <div className="flex items-center justify-between">
         <div>
           <p className="text-xs text-gray uppercase tracking-wider">Vencimento</p>
-          <p className="font-bold text-graphite text-lg">{fmtData(f.vencimento)}</p>
+          <p className="font-bold text-graphite text-xl">{fmtData(f.vencimento)}</p>
         </div>
         <div className="text-right">
           <p className="text-xs text-gray uppercase tracking-wider">Valor</p>
-          <p className="font-bold text-graphite text-lg">{f.valor ? `R$ ${f.valor}` : "—"}</p>
+          <p className="font-bold text-graphite text-xl">{f.valor ? `R$ ${f.valor}` : "—"}</p>
         </div>
       </div>
       {f.situacao && (

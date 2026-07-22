@@ -23,6 +23,13 @@
   --font-sans: var(--font-poppins), ui-sans-serif, system-ui, sans-serif;
 }
 
+/* Dentro do iframe do Bitrix os elementos ficavam pequenos. Subimos a base rem: como
+   Tailwind dimensiona tudo (fontes, paddings, gaps, raios) em rem, isso amplia a interface
+   INTEIRA de forma proporcional, sem desalinhar nada. */
+html {
+  font-size: 18px;
+}
+
 body {
   background-color: #f9fafb; /* gray-50, igual à cotação */
   color: #282828; /* graphite */
