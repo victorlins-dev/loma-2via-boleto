@@ -65,17 +65,20 @@ async function porPlaca(
   const { faturas } = await listarUltimasFaturas(p, info?.codigo ?? null, 3);
   if (faturas.length) {
     // A listagem nem sempre traz o link do PDF (link_boleto) — enriquece cada fatura pelo
-    // endpoint de boleto individual (traz linha digitável + link PDF + PIX numa chamada).
-    for (const f of faturas) {
-      if (f.nossoNumero && (!f.linkBoleto || !f.linhaDigitavel || !f.pixCopiaCola)) {
-        const det = await buscarBoleto(f.nossoNumero);
-        if (det) {
-          f.linkBoleto = f.linkBoleto || det.linkBoleto;
-          f.linhaDigitavel = f.linhaDigitavel || det.linhaDigitavel;
-          f.pixCopiaCola = f.pixCopiaCola || det.pixCopiaCola;
+    // endpoint de boleto individual (linha digitável + link PDF + PIX numa chamada). Em PARALELO
+    // (até 3 faturas de uma vez) em vez de uma por vez, pra não somar latência.
+    await Promise.all(
+      faturas.map(async (f) => {
+        if (f.nossoNumero && (!f.linkBoleto || !f.linhaDigitavel || !f.pixCopiaCola)) {
+          const det = await buscarBoleto(f.nossoNumero);
+          if (det) {
+            f.linkBoleto = f.linkBoleto || det.linkBoleto;
+            f.linhaDigitavel = f.linhaDigitavel || det.linhaDigitavel;
+            f.pixCopiaCola = f.pixCopiaCola || det.pixCopiaCola;
+          }
         }
-      }
-    }
+      }),
+    );
     return {
       result: "ok",
       associadoNome: info?.nome ?? null,

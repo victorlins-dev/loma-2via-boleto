@@ -14,9 +14,17 @@
 import axios from "axios";
 
 const AUTH_PATH = "/usuario/autenticar";
-const HTTP_TIMEOUT_MS = 15000;
+const HTTP_TIMEOUT_MS = 10000; // falha mais rapido que os 15s antigos (evita travar a tela)
 
 let cachedToken: string | null = null;
+let authInFlight: Promise<string> | null = null;
+// Dedupe de autenticacao: com varias chamadas em PARALELO e token ainda nao obtido, todas
+// compartilham UMA unica autenticacao (o token da SGA nao expira, entao basta uma).
+async function ensureAuth(): Promise<string> {
+  if (cachedToken) return cachedToken;
+  if (!authInFlight) authInFlight = authenticate().finally(() => { authInFlight = null; });
+  return authInFlight;
+}
 
 function host(): string {
   const h = process.env.SGA_HOST;
@@ -98,7 +106,7 @@ async function authenticate(): Promise<string> {
 }
 
 async function authed(method: "get" | "post", path: string, body?: unknown): Promise<unknown> {
-  if (!cachedToken) await authenticate();
+  if (!cachedToken) await ensureAuth();
   const call = () =>
     axios.request({
       method,
@@ -210,8 +218,11 @@ export type ListagemBoletos = {
 
 /** As N últimas faturas (histórico), mais recentes primeiro.
  *  ⚠️ O endpoint /listar/boleto-associado-veiculo tem LIMITE DE 90 DIAS por intervalo (doc oficial).
- *  Por isso varremos em JANELAS de ~90 dias andando pra trás (até ~18 meses), acumulando, até ter as
- *  N mais recentes. `link_boleto: true` traz o link do PDF na própria listagem. */
+ *  Por isso varremos em JANELAS de ~90 dias andando pra trás (~12 meses = 4 janelas). Antes era
+ *  SEQUENCIAL (até 12 chamadas em fila → ~15s no pior caso, conta no cartão). Agora as janelas de
+ *  cada varredura vão EM PARALELO (lote pequeno = nº de janelas ~4). A doc da SGA não declara limite
+ *  de requisições, então mantemos o paralelismo conservador. `link_boleto: true` traz o PDF na listagem. */
+const FATURA_JANELAS = 4; // ~12 meses (4 x ~90 dias) — cobre as 3 últimas faturas com folga
 export async function listarUltimasFaturas(
   placa: string,
   codigo: string | null,
@@ -223,28 +234,32 @@ export async function listarUltimasFaturas(
   const acc = new Map<string, Record<string, unknown>>();
 
   const varrer = async (ident: Record<string, unknown>, tag: string) => {
-    for (let i = 0; i < 6 && acc.size < n; i++) {
-      const fim = new Date(Date.now() - i * 90 * DAY + 3 * DAY); // +3d no + recente pega o vincendo
-      const ini = new Date(fim.getTime() - 88 * DAY); // 88 dias < limite de 90
-      const body = {
-        ...ident,
-        data_vencimento_inicial: fmtBr(ini),
-        data_vencimento_final: fmtBr(fim),
-        link_boleto: true,
-      };
-      let rows: Record<string, unknown>[] = [];
-      try {
-        rows = asArray(await authed("post", "/listar/boleto-associado-veiculo", body));
-        attempts.push({ via: `${tag}_win${i}`, n: rows.length });
-      } catch {
-        attempts.push({ via: `${tag}_win${i}_ERR`, n: -1 });
-        continue;
-      }
+    // Todas as janelas em PARALELO (lote de FATURA_JANELAS ~4).
+    const lotes = await Promise.all(
+      Array.from({ length: FATURA_JANELAS }, async (_, i) => {
+        const fim = new Date(Date.now() - i * 90 * DAY + 3 * DAY); // +3d no + recente pega o vincendo
+        const ini = new Date(fim.getTime() - 88 * DAY); // 88 dias < limite de 90
+        const body = {
+          ...ident,
+          data_vencimento_inicial: fmtBr(ini),
+          data_vencimento_final: fmtBr(fim),
+          link_boleto: true,
+        };
+        try {
+          const rows = asArray(await authed("post", "/listar/boleto-associado-veiculo", body));
+          attempts.push({ via: `${tag}_win${i}`, n: rows.length });
+          return rows;
+        } catch {
+          attempts.push({ via: `${tag}_win${i}_ERR`, n: -1 });
+          return [] as Record<string, unknown>[];
+        }
+      }),
+    );
+    for (const rows of lotes)
       for (const r of rows) {
         const key = String(r.nosso_numero ?? r.codigo_boleto ?? JSON.stringify(r));
         if (!acc.has(key)) acc.set(key, r);
       }
-    }
   };
 
   await varrer({ placa: p }, "placa");
