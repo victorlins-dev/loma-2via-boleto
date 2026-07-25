@@ -41,7 +41,21 @@ export type Associado = {
   cpf: string | null;
   codigo: string | null;
   veiculos: Veiculo[];
+  // Forma de pagamento REALMENTE cadastrada (ex: "BOLETO / CARNÊ", "CARTÃO DE CRÉDITO"...).
+  // Vem do mesmo payload de /associado/buscar (achado 24/07: não dava pra inferir "cartão"
+  // pela ausência de boleto na janela de busca — inadimplente antigo fora da janela virava
+  // falso "cartão recorrente". Agora usa o campo real em vez de adivinhar.)
+  formaPagamentoRecorrente: string | null;
 };
+
+/** true se a descrição indica cobrança recorrente NO CARTÃO (não boleto/carnê). null/desconhecido = false
+ *  (não afirma recorrente sem o dado real — evita repetir o erro do heurístico antigo). */
+export function ehRecorrenteCartao(descricao: string | null): boolean {
+  if (!descricao) return false;
+  const d = normalizeText(descricao);
+  if (d.includes("BOLETO") || d.includes("CARNE")) return false;
+  return d.includes("CART") || d.includes("RECORR") || d.includes("DEBITO") || d.includes("DÉBITO");
+}
 export type Fatura = {
   nossoNumero: string | null;
   valor: string | null;
@@ -145,7 +159,8 @@ function pickAssociado(rec: Record<string, unknown> | null): Associado | null {
       modelo: modeloSimples(readStr(v, ["descricao_modelo", "modelo"])),
     }))
     .filter((v) => v.placa);
-  return { nome, cpf, codigo: codigo ? String(codigo) : null, veiculos };
+  const formaPagamentoRecorrente = readStr(rec, ["descricao_tipo_cobranca_recorrente"]) || null;
+  return { nome, cpf, codigo: codigo ? String(codigo) : null, veiculos, formaPagamentoRecorrente };
 }
 
 export async function buscarPorCpf(cpf: string): Promise<Associado | null> {
@@ -336,6 +351,61 @@ export async function buscarBoleto(nossoNumero: string): Promise<Fatura | null> 
   const data = await authed("get", `/buscar/boleto/${nn}`);
   const rec = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null;
   return rec ? pickFatura(rec) : null;
+}
+
+export type AlteracaoSituacao = {
+  codigoAlteracao: string;
+  codigoAssociado: string;
+  cpf: string;
+  valorAnterior: string | null;
+  valorPosterior: string;
+  dataAlteracao: string; // ISO, combina data_alteracao + hora_alteracao
+};
+
+/** Mudanças de codigo_situacao de associados num período (máx. ~7 dias por chamada, doc oficial).
+ *  Sem `valor_posterior` (testado ao vivo 24/07: filtro é opcional) devolve TODAS as transições,
+ *  de qualquer código — é o que alimenta o histórico local (situacao_historico). */
+export async function listarAlteracoesSituacaoAssociado(dataInicial: Date, dataFinal: Date): Promise<AlteracaoSituacao[]> {
+  const data = await authed("post", "/listar/alteracao-associados/", {
+    data_inicial: fmtBr(dataInicial),
+    data_final: fmtBr(dataFinal),
+    campos: ["codigo_situacao"],
+  });
+  const arr = asArray(data);
+  return arr
+    .map((row) => {
+      const codigoAlteracao = readStr(row, ["codigo_alteracao"]);
+      const codigoAssociado = readStr(row, ["codigo_associado"]);
+      const cpf = readStr(row, ["cpf_associado"]).replace(/\D/g, "");
+      const valorPosterior = readStr(row, ["valor_posterior"]);
+      if (!codigoAlteracao || !codigoAssociado || !cpf || !valorPosterior) return null;
+      const dataAlt = readStr(row, ["data_alteracao"]).slice(0, 10); // yyyy-mm-dd
+      const hora = readStr(row, ["hora_alteracao"]) || "00:00:00";
+      return {
+        codigoAlteracao,
+        codigoAssociado,
+        cpf,
+        valorAnterior: readStr(row, ["valor_anterior"]) || null,
+        valorPosterior,
+        dataAlteracao: dataAlt ? `${dataAlt}T${hora}` : new Date().toISOString(),
+      };
+    })
+    .filter((x): x is AlteracaoSituacao => x !== null);
+}
+
+export type SituacaoCatalogoItem = { codigo: string; descricao: string };
+
+/** Catálogo codigo_situacao → descrição (ATIVO/INADIMPLENTE/...). Muda raramente — sincronizar
+ *  periodicamente (mesmo cron do histórico), não a cada consulta. */
+export async function listarCatalogoSituacao(): Promise<SituacaoCatalogoItem[]> {
+  const data = await authed("get", "/listar/situacao/todos");
+  const arr = asArray(data);
+  return arr
+    .map((row) => ({
+      codigo: readStr(row, ["codigo_situacao"]),
+      descricao: readStr(row, ["descricao_situacao", "descricao"]),
+    }))
+    .filter((x) => x.codigo && x.descricao);
 }
 
 export function _resetForTests() {

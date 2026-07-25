@@ -19,7 +19,12 @@ type Fatura = {
   pixCopiaCola: string | null;
 };
 type PlacaOpcao = { placa: string; modelo: string | null; situacao: string };
-type SituacaoInfo = { associado: string | null; financeira: string | null };
+type SituacaoInfo = {
+  associado: string | null;
+  financeira: string | null;
+  notaAssociado?: string | null;
+  notaFinanceira?: string | null;
+};
 type Evento = {
   protocolo: string | null;
   data: string | null;
@@ -32,7 +37,7 @@ type Resultado =
   | { result: "ok"; associadoNome: string | null; codigo: string | null; placa: string; modelo: string | null; situacao: SituacaoInfo; eventos: Evento[]; faturas: Fatura[] }
   | { result: "selecionar_placa"; associadoNome: string | null; codigo: string | null; veiculos: PlacaOpcao[] }
   | { result: "recorrente"; associadoNome: string | null; codigo: string | null; placa: string; situacao: SituacaoInfo; eventos: Evento[]; mensagem: string }
-  | { result: "nao_encontrado"; motivo: "associado" | "placa" | "sem_faturas" };
+  | { result: "nao_encontrado"; motivo: "associado" | "placa" | "sem_faturas"; associadoNome?: string | null; placa?: string; situacao?: SituacaoInfo; eventos?: Evento[] };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare const BX24: any;
@@ -246,14 +251,14 @@ export default function Home() {
 
           {res && (
             <div className="mt-6 animate-fade-in space-y-3">
-              {(res.result === "ok" || res.result === "recorrente") && (
+              {(res.result === "ok" || res.result === "recorrente" || (res.result === "nao_encontrado" && res.situacao)) && (
                 <>
                   <SituacaoCard
-                    nome={res.associadoNome}
-                    placa={res.result === "ok" ? `${res.modelo ? `${res.modelo} · ` : ""}${res.placa}` : res.placa}
-                    situacao={res.situacao}
+                    nome={res.associadoNome ?? null}
+                    placa={res.result === "ok" ? `${res.modelo ? `${res.modelo} · ` : ""}${res.placa}` : res.placa || ""}
+                    situacao={res.situacao!}
                   />
-                  <EventosCard eventos={res.eventos} />
+                  <EventosCard eventos={res.eventos || []} />
                 </>
               )}
 
@@ -317,7 +322,10 @@ export default function Home() {
                   <p className="text-sm text-gray-text">
                     {res.motivo === "associado" && "Não encontramos um associado com esse CPF."}
                     {res.motivo === "placa" && "Não encontramos veículo/placa para essa busca."}
-                    {res.motivo === "sem_faturas" && "Nenhuma fatura encontrada para essa placa."}
+                    {res.motivo === "sem_faturas" &&
+                      (res.situacao
+                        ? "Nenhum boleto encontrado no período consultável (a Hinova só permite consultar janelas recentes). Veja a situação acima — se houver pendência mais antiga, consulte diretamente no SGA."
+                        : "Nenhuma fatura encontrada para essa placa.")}
                   </p>
                 </div>
               )}
@@ -369,6 +377,7 @@ function SituacaoCard({
                 {tomAssoc === "ruim" ? <ShieldAlert className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
                 {situacao.associado}
               </span>
+              {situacao.notaAssociado && <span className="text-xs text-gray-text">{situacao.notaAssociado}</span>}
             </div>
           )}
           {situacao.financeira && (
@@ -378,6 +387,7 @@ function SituacaoCard({
                 <Wallet className="w-4 h-4" />
                 {situacao.financeira}
               </span>
+              {situacao.notaFinanceira && <span className="text-xs text-gray-text">{situacao.notaFinanceira}</span>}
             </div>
           )}
         </div>

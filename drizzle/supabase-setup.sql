@@ -35,3 +35,26 @@ drop trigger if exists audit_immutable on audit_consulta;
 create trigger audit_immutable
   before update or delete on audit_consulta
   for each row execute function audit_no_mutation();
+
+-- === Histórico de situação do associado (24/07) — espelho local do log da Hinova ===
+-- Motivo: `listar/alteracao-associados` da Hinova só permite janelas de 7 dias e não filtra por
+-- associado — inviável bater ao vivo por consulta. Sincroniza 1x/dia (cron); consulta ao vivo lê daqui.
+create table if not exists situacao_historico (
+  id                bigint generated always as identity primary key,
+  codigo_alteracao  text not null,          -- chave natural do evento na Hinova (dedupe)
+  codigo_associado  text not null,
+  cpf               text not null,
+  valor_anterior    text,                   -- codigo_situacao anterior
+  valor_posterior   text not null,          -- codigo_situacao novo
+  data_alteracao    timestamptz not null,
+  sincronizado_em   timestamptz not null default now(),
+  constraint situacao_historico_codigo_alteracao_key unique (codigo_alteracao)
+);
+create index if not exists situacao_historico_cpf_idx on situacao_historico (cpf, data_alteracao);
+
+-- Catálogo codigo_situacao → descrição (ex: "4" → "INADIMPLENTE"). Refrescado no mesmo cron.
+create table if not exists situacao_catalogo (
+  codigo_situacao  text primary key,
+  descricao        text not null,
+  sincronizado_em  timestamptz not null default now()
+);
