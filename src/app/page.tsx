@@ -324,7 +324,7 @@ export default function Home() {
                     {res.motivo === "placa" && "Não encontramos veículo/placa para essa busca."}
                     {res.motivo === "sem_faturas" &&
                       (res.situacao
-                        ? "Nenhum boleto encontrado no período consultável (a Hinova só permite consultar janelas recentes). Veja a situação acima — se houver pendência mais antiga, consulte diretamente no SGA."
+                        ? "Nenhum boleto encontrado no período consultável (a Hinova só permite consultar janelas recentes). Veja a situação acima."
                         : "Nenhuma fatura encontrada para essa placa.")}
                   </p>
                 </div>
