@@ -12,6 +12,9 @@ import { registrarConsulta } from "@/lib/audit";
 import { hasDb } from "@/lib/db/client";
 
 export const runtime = "nodejs";
+// Sem isso, cai no default da Vercel — apertado demais pra situação/eventos + faturas + detalhe de
+// boleto (3 chamadas sequenciais ao SGA, até 10s cada no pior caso) + auditoria no mesmo request.
+export const maxDuration = 30;
 
 const IS_PROD = process.env.NODE_ENV === "production";
 // Modo DEV blindado: só vale FORA de produção (mesmo que a env vaze pra Vercel, não abre).

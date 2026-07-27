@@ -147,11 +147,17 @@ export default function Home() {
         setPlaca(""); // zera os campos ao consultar (pedido do Victor)
       }
       setLoading(true);
+      // Timeout no fetch: sem isso, se a conexão ficar pendurada (ex: resposta do servidor não chega
+      // de volta ao navegador dentro do iframe do Bitrix), a tela trava em "Consultando..." pra sempre,
+      // já que fetch() nativo não tem timeout próprio (achado 27/07 — caso placa FSR5550).
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 25000);
       try {
         const r = await fetch("/api/consulta", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ auth, cpf: temCpf ? cpfDigits : "", placa: temPlaca ? placaUsar : "" }),
+          signal: controller.signal,
         });
         const data = await r.json();
         if (!r.ok) {
@@ -159,9 +165,14 @@ export default function Home() {
           return;
         }
         setRes(data as Resultado);
-      } catch {
-        setErro("Falha de conexão. Tente novamente.");
+      } catch (err) {
+        setErro(
+          err instanceof DOMException && err.name === "AbortError"
+            ? "A consulta demorou demais. Tente novamente."
+            : "Falha de conexão. Tente novamente.",
+        );
       } finally {
+        clearTimeout(timeoutId);
         setLoading(false);
       }
     },
