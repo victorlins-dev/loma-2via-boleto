@@ -1,10 +1,11 @@
 // audit.ts — grava a trilha de auditoria. É subproduto OBRIGATÓRIO da consulta: o handler grava o
 // audit ANTES de devolver a resposta ao executivo (sem log → sem resposta). Não dá pra burlar pelo front.
-// CPF/placa entram MASCARADOS (lib/mask). Tabela imutável (INSERT-only garantido pela migration).
+// CPF/placa entram em CLARO (decisão Victor 27/07 — o painel admin é restrito/autenticado, precisa
+// mostrar exatamente o que foi consultado). Consultas gravadas ANTES dessa data continuam mascaradas
+// pra sempre (o valor cru nunca foi persistido). Tabela imutável (INSERT-only garantido pela migration).
 
 import { db } from "@/lib/db/client";
 import { auditConsulta } from "@/lib/db/schema";
-import { maskCpf, maskPlaca } from "@/lib/mask";
 
 export type AuditInput = {
   actorUserId: string;
@@ -28,15 +29,15 @@ export async function registrarConsulta(input: AuditInput): Promise<void> {
     return;
   }
   const partes = [
-    input.cpf ? `cpf=${maskCpf(input.cpf)}` : null,
-    input.placa ? `placa=${maskPlaca(input.placa)}` : null,
+    input.cpf ? `cpf=${input.cpf}` : null,
+    input.placa ? `placa=${input.placa}` : null,
   ].filter(Boolean);
   await db.insert(auditConsulta).values({
     actorUserId: input.actorUserId,
     actorNome: input.actorNome ?? null,
     action: input.action,
     target: input.target ?? null,
-    queryParam: partes.join(" ") || null, // já mascarado
+    queryParam: partes.join(" ") || null,
     result: input.result,
     recordsReturned: input.recordsReturned ?? null,
     sourceIp: input.sourceIp ?? null,

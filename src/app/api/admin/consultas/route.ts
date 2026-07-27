@@ -1,21 +1,28 @@
-// POST /api/admin/consultas — lista a trilha de auditoria pro painel admin. SÓ ADMIN.
-// Valida sessão (portal fixado) + exige user.admin. Filtros: usuário, período, resultado.
+// POST /api/admin/consultas — lista a trilha de auditoria pro painel admin (externo, fora do
+// Bitrix). Auth = sessão Supabase (painel próprio), não mais a sessão do Bitrix — o app em si
+// (/, dentro do iframe) continua gravando a auditoria exatamente como antes, só quem LÊ aqui mudou.
+// Paginação por cursor (event_time, id) em vez do limit(500) fixo antigo.
 
 import { NextRequest, NextResponse } from "next/server";
-import { validarSessao, usuarioAtual, memberPermitido } from "@/lib/clients/bitrix";
+import { createClient } from "@/lib/supabase/server";
 import { db } from "@/lib/db/client";
 import { auditConsulta } from "@/lib/db/schema";
-import { and, desc, eq, gte, lte, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 
 export const runtime = "nodejs";
 
-const IS_PROD = process.env.NODE_ENV === "production";
-const DEV_NO_AUTH = process.env.ALLOW_DEV_NO_AUTH === "1" && !IS_PROD;
+const PAGE_SIZE = 100;
 
 export async function POST(req: NextRequest) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "sessão ausente" }, { status: 401 });
+
   let body: {
-    auth?: { access_token?: string; member_id?: string };
     filtros?: { actor?: string; de?: string; ate?: string; result?: string };
+    cursor?: { eventTime: string; id: number } | null;
   };
   try {
     body = await req.json();
@@ -23,20 +30,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "corpo inválido" }, { status: 400 });
   }
 
-  const accessToken = body.auth?.access_token || "";
-  const memberId = body.auth?.member_id || "";
-
-  // Gate de admin (em dev, o modo local entra como admin).
-  if (!(DEV_NO_AUTH && !accessToken)) {
-    if (!accessToken) return NextResponse.json({ error: "sessão ausente" }, { status: 401 });
-    if (!memberPermitido(memberId)) return NextResponse.json({ error: "portal não autorizado" }, { status: 403 });
-    if (!(await validarSessao(accessToken))) return NextResponse.json({ error: "sessão inválida" }, { status: 401 });
-    const user = await usuarioAtual(accessToken);
-    if (!user) return NextResponse.json({ error: "usuário não identificado" }, { status: 401 });
-    if (!user.isAdmin) return NextResponse.json({ error: "acesso restrito a administradores" }, { status: 403 });
-  }
-
-  if (!db) return NextResponse.json({ rows: [], semBanco: true });
+  if (!db) return NextResponse.json({ rows: [], proximoCursor: null, semBanco: true });
 
   const f = body.filtros || {};
   const conds: SQL[] = [];
@@ -45,12 +39,23 @@ export async function POST(req: NextRequest) {
   if (f.de) conds.push(gte(auditConsulta.eventTime, new Date(f.de)));
   if (f.ate) conds.push(lte(auditConsulta.eventTime, new Date(f.ate)));
 
+  const cursor = body.cursor;
+  if (cursor?.eventTime && Number.isFinite(cursor.id)) {
+    conds.push(
+      sql`(${auditConsulta.eventTime}, ${auditConsulta.id}) < (${new Date(cursor.eventTime)}, ${cursor.id})`,
+    );
+  }
+
   const rows = await db
     .select()
     .from(auditConsulta)
     .where(conds.length ? and(...conds) : undefined)
-    .orderBy(desc(auditConsulta.eventTime))
-    .limit(500);
+    .orderBy(desc(auditConsulta.eventTime), desc(auditConsulta.id))
+    .limit(PAGE_SIZE);
 
-  return NextResponse.json({ rows });
+  const ultima = rows[rows.length - 1];
+  const proximoCursor =
+    rows.length === PAGE_SIZE && ultima ? { eventTime: ultima.eventTime.toISOString(), id: ultima.id } : null;
+
+  return NextResponse.json({ rows, proximoCursor });
 }

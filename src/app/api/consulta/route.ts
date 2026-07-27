@@ -81,6 +81,7 @@ export async function POST(req: NextRequest) {
       recordsReturned: records,
       sourceIp: ip,
       userAgent: ua,
+      metadata: r.result === "nao_encontrado" ? { motivo: r.motivo } : null,
     });
 
     return NextResponse.json(r);

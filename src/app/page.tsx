@@ -116,6 +116,9 @@ export default function Home() {
   const [res, setRes] = useState<Resultado | null>(null);
   const [copiado, setCopiado] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // O que foi REALMENTE buscado na última consulta — sobrevive à limpeza do formulário (abaixo),
+  // pra auditoria de ações (baixar PDF/copiar) saber a que CPF/placa aquele resultado pertence.
+  const [buscado, setBuscado] = useState({ cpf: "", placa: "" });
 
   useEffect(() => {
     try {
@@ -137,6 +140,7 @@ export default function Home() {
         setErro("Informe o CPF completo ou a placa.");
         return;
       }
+      setBuscado({ cpf: temCpf ? cpfDigits : "", placa: temPlaca ? placaUsar : "" });
       if (!placaOverride) {
         setRes(null);
         setCpf("");
@@ -171,11 +175,11 @@ export default function Home() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           keepalive: true,
-          body: JSON.stringify({ auth, action, target, cpf: cpf.replace(/\D/g, ""), placa: placa.trim() }),
+          body: JSON.stringify({ auth, action, target, cpf: buscado.cpf, placa: buscado.placa }),
         });
       } catch {}
     },
-    [auth, cpf, placa],
+    [auth, buscado],
   );
 
   const copiar = useCallback(
