@@ -65,3 +65,30 @@ export const situacaoCatalogo = pgTable("situacao_catalogo", {
   descricao: text("descricao").notNull(),
   sincronizadoEm: timestamp("sincronizado_em", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// import_lead_audit — trilha da Importação de Leads (pedido do Luan 27/07): líder cola nome+telefone,
+// vira Contato+Negócio em Comercial → Lista 300, atribuído a um executivo. UMA linha por IMPORTAÇÃO
+// (lote inteiro), não por lead — os leads em si não ficam guardados aqui, o Bitrix já é a fonte de
+// verdade deles. Append-only, mesmo padrão do audit_consulta (hardening na migration).
+export const importLeadAudit = pgTable(
+  "import_lead_audit",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    eventTime: timestamp("event_time", { withTimezone: true }).notNull().defaultNow(),
+    liderUserId: text("lider_user_id").notNull(),
+    liderNome: text("lider_nome"),
+    executivoDestinoId: text("executivo_destino_id").notNull(),
+    executivoDestinoNome: text("executivo_destino_nome"),
+    totalLinhas: integer("total_linhas").notNull(),
+    criados: integer("criados").notNull(),
+    ignorados: integer("ignorados").notNull(),
+    erros: integer("erros").notNull(),
+    sourceIp: text("source_ip"),
+    userAgent: text("user_agent"),
+    metadata: jsonb("metadata"), // detalhe dos erros por linha (nome/telefone mascarado/motivo)
+  },
+  (t) => [
+    index("import_lead_audit_time_brin").using("brin", t.eventTime),
+    index("import_lead_audit_lider_idx").on(t.liderUserId, t.eventTime),
+  ],
+);

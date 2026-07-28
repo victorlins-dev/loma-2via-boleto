@@ -5,7 +5,7 @@
 // pra sempre (o valor cru nunca foi persistido). Tabela imutável (INSERT-only garantido pela migration).
 
 import { db } from "@/lib/db/client";
-import { auditConsulta } from "@/lib/db/schema";
+import { auditConsulta, importLeadAudit } from "@/lib/db/schema";
 
 export type AuditInput = {
   actorUserId: string;
@@ -42,6 +42,41 @@ export async function registrarConsulta(input: AuditInput): Promise<void> {
     recordsReturned: input.recordsReturned ?? null,
     sourceIp: input.sourceIp ?? null,
     sessionId: input.sessionId ?? null,
+    userAgent: input.userAgent ?? null,
+    metadata: input.metadata ?? null,
+  });
+}
+
+export type AuditImportacaoInput = {
+  liderUserId: string;
+  liderNome?: string | null;
+  executivoDestinoId: string;
+  executivoDestinoNome?: string | null;
+  totalLinhas: number;
+  criados: number;
+  ignorados: number;
+  erros: number;
+  sourceIp?: string | null;
+  userAgent?: string | null;
+  metadata?: Record<string, unknown> | null;
+};
+
+/** Uma linha por IMPORTAÇÃO de leads (lote inteiro) — não grava os leads em si. */
+export async function registrarImportacaoLeads(input: AuditImportacaoInput): Promise<void> {
+  if (!db) {
+    console.warn("[audit] sem DATABASE_URL — importação NÃO auditada (só dev local).");
+    return;
+  }
+  await db.insert(importLeadAudit).values({
+    liderUserId: input.liderUserId,
+    liderNome: input.liderNome ?? null,
+    executivoDestinoId: input.executivoDestinoId,
+    executivoDestinoNome: input.executivoDestinoNome ?? null,
+    totalLinhas: input.totalLinhas,
+    criados: input.criados,
+    ignorados: input.ignorados,
+    erros: input.erros,
+    sourceIp: input.sourceIp ?? null,
     userAgent: input.userAgent ?? null,
     metadata: input.metadata ?? null,
   });

@@ -58,3 +58,36 @@ create table if not exists situacao_catalogo (
   descricao        text not null,
   sincronizado_em  timestamptz not null default now()
 );
+
+-- === Importação de Leads (27/07) — auditoria por LOTE, não por lead ===
+-- Líder cola nome+telefone, vira Contato+Negócio em Comercial → Lista 300. Os leads em si não ficam
+-- guardados aqui (o Bitrix já é a fonte de verdade); só o registro de quem importou o quê pra quem.
+create table if not exists import_lead_audit (
+  id                      bigint generated always as identity primary key,
+  event_time              timestamptz not null default now(),
+  lider_user_id           text not null,
+  lider_nome              text,
+  executivo_destino_id    text not null,
+  executivo_destino_nome  text,
+  total_linhas            integer not null,
+  criados                 integer not null,
+  ignorados               integer not null,
+  erros                   integer not null,
+  source_ip               text,
+  user_agent              text,
+  metadata                jsonb
+);
+create index if not exists import_lead_audit_time_brin  on import_lead_audit using brin (event_time);
+create index if not exists import_lead_audit_lider_idx  on import_lead_audit (lider_user_id, event_time);
+
+-- Append-only, mesmo padrão do audit_consulta.
+create or replace function import_lead_audit_no_mutation() returns trigger language plpgsql as $$
+begin
+  raise exception 'import_lead_audit e append-only: UPDATE/DELETE bloqueados';
+end;
+$$;
+
+drop trigger if exists import_lead_audit_immutable on import_lead_audit;
+create trigger import_lead_audit_immutable
+  before update or delete on import_lead_audit
+  for each row execute function import_lead_audit_no_mutation();
