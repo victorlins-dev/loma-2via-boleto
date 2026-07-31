@@ -108,18 +108,68 @@ function fmtBr(d: Date): string {
   return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
 }
 
+/** A Hinova (SGA) não respondeu — não é erro nosso e não é dado que falta.
+ *  Existe porque o SGA CAI COM FREQUÊNCIA (incidente de 31/07/2026, 14:30-14:34: gateway devolvendo
+ *  502 em toda chamada). Sem distinguir isso, a tela dizia "falha ao consultar" e o executivo achava
+ *  que o app estava quebrado — e nós fomos caçar bug no lugar errado. Quem trata este erro TEM que
+ *  dizer na tela que a queda é da Hinova. */
+export class SgaIndisponivelError extends Error {
+  constructor(readonly motivo: "5xx" | "timeout" | "rede", readonly detalhe: string) {
+    super(`SGA indisponível (${motivo}): ${detalhe}`);
+    this.name = "SgaIndisponivelError";
+  }
+}
+
+// 2 repetições (3 tentativas no total) com espera crescente. Não é exagero: em 31/07/2026, medido
+// ao vivo, o SGA alternava 200 / 502 / 200 em chamadas seguidas — falha INTERMITENTE, ~1 em 3. Com
+// uma repetição só, ~11% das consultas ainda quebrariam. O 502 dele volta rápido (~0,2s), então
+// repetir é barato: no pior caso somamos ~2,1s de espera, longe do limite de 25s do front.
+const RETRY_5XX_MAX = 2;
+const RETRY_5XX_DELAY_MS = 700;
+const dorme = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Classifica a falha de uma chamada ao SGA. Devolve o erro tipado quando é queda da Hinova
+ *  (5xx, timeout, conexão) — e `null` quando é outra coisa, que sobe como erro normal. */
+function classificaFalhaSga(err: unknown): SgaIndisponivelError | null {
+  if (!axios.isAxiosError(err)) return null;
+  const status = err.response?.status;
+  if (status && status >= 500) return new SgaIndisponivelError("5xx", `HTTP ${status}`);
+  if (!err.response) {
+    // Sem resposta = timeout do nosso lado ou conexão derrubada. Nos dois casos, o SGA não respondeu.
+    const timeout = err.code === "ECONNABORTED" || err.code === "ETIMEDOUT";
+    return new SgaIndisponivelError(timeout ? "timeout" : "rede", err.code || "sem resposta");
+  }
+  return null;
+}
+
 async function authenticate(): Promise<string> {
-  const res = await axios.post(
-    `${host()}${AUTH_PATH}`,
-    { usuario: process.env.SGA_USER, senha: process.env.SGA_PASSWORD },
-    {
-      timeout: HTTP_TIMEOUT_MS,
-      headers: {
-        "Content-Type": "application/json",
-        ...(process.env.SGA_TOKEN ? { Authorization: `Bearer ${process.env.SGA_TOKEN}` } : {}),
+  const post = () =>
+    axios.post(
+      `${host()}${AUTH_PATH}`,
+      { usuario: process.env.SGA_USER, senha: process.env.SGA_PASSWORD },
+      {
+        timeout: HTTP_TIMEOUT_MS,
+        headers: {
+          "Content-Type": "application/json",
+          ...(process.env.SGA_TOKEN ? { Authorization: `Bearer ${process.env.SGA_TOKEN}` } : {}),
+        },
       },
-    },
-  );
+    );
+  // Mesma política do `authed`: repete em 5xx, e queda da Hinova sobe como erro TIPADO — se a
+  // autenticação falha porque o SGA caiu, a tela tem que dizer isso, não "falha ao consultar".
+  // ⚠️ É AQUI que o 502 intermitente da Hinova bate primeiro (a autenticação é a 1ª chamada de toda
+  // consulta), então repetir neste ponto é o que mais evita erro na cara do executivo.
+  let res;
+  for (let tentativa = 0; ; tentativa++) {
+    try {
+      res = await post();
+      break;
+    } catch (err) {
+      const falha = classificaFalhaSga(err);
+      if (falha?.motivo !== "5xx" || tentativa >= RETRY_5XX_MAX) throw falha ?? err;
+      await dorme(RETRY_5XX_DELAY_MS * (tentativa + 1));
+    }
+  }
   const token = res.data?.token_usuario;
   if (!token) throw new Error("SGA auth: token_usuario ausente");
   cachedToken = token;
@@ -140,10 +190,26 @@ async function authed(method: "get" | "post", path: string, body?: unknown): Pro
       },
       validateStatus: (s) => (s >= 200 && s < 300) || s === 401 || s === 404 || s === 406,
     });
-  let res = await call();
+  // Uma repetição em cima de 5xx: queda de gateway do SGA costuma passar em segundos, e desistir na
+  // primeira tentativa jogava o erro na cara do executivo sem necessidade.
+  // ⚠️ NÃO repetimos em timeout: a rota da Vercel morre em 30s e o front desiste em 25s — repetir
+  // uma chamada que já pendurou 10s é gastar o orçamento de tempo e travar a tela.
+  const chamaComRetry = async () => {
+    for (let tentativa = 0; ; tentativa++) {
+      try {
+        return await call();
+      } catch (err) {
+        const falha = classificaFalhaSga(err);
+        // Só 5xx é repetível. Timeout não (gasta o orçamento de tempo) e erro nosso muito menos.
+        if (falha?.motivo !== "5xx" || tentativa >= RETRY_5XX_MAX) throw falha ?? err;
+        await dorme(RETRY_5XX_DELAY_MS * (tentativa + 1));
+      }
+    }
+  };
+  let res = await chamaComRetry();
   if (res.status === 401) {
     await authenticate();
-    res = await call();
+    res = await chamaComRetry();
   }
   if (res.status === 404 || res.status === 406) return null; // não-existe/vazio, não é erro
   if (res.status < 200 || res.status >= 300) throw new Error(`SGA ${path} falhou: ${res.status}`);

@@ -7,6 +7,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { validarSessao, usuarioAtual, memberPermitido } from "@/lib/clients/bitrix";
+import { SgaIndisponivelError } from "@/lib/clients/sga";
 import { consultarFaturas } from "@/lib/services/boleto.service";
 import { registrarConsulta } from "@/lib/audit";
 import { hasDb } from "@/lib/db/client";
@@ -89,6 +90,11 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(r);
   } catch (err) {
+    // Queda da Hinova é tratada SEPARADAMENTE: o SGA cai com frequência, e o executivo precisa
+    // saber que o problema não é o app (senão ele para de usar e abre chamado no lugar errado).
+    // Fica gravado como `result: "erro"` de propósito — assim a taxa de erro do painel continua
+    // certa — e a CAUSA vai no metadata (`fonte: "hinova"`), que o painel mostra na linha.
+    const quedaHinova = err instanceof SgaIndisponivelError;
     try {
       await registrarConsulta({
         actorUserId: user.id,
@@ -99,10 +105,22 @@ export async function POST(req: NextRequest) {
         result: "erro",
         sourceIp: ip,
         userAgent: ua,
-        metadata: { msg: err instanceof Error ? err.message : "erro" },
+        metadata: quedaHinova
+          ? { fonte: "hinova", motivo: (err as SgaIndisponivelError).motivo, msg: (err as Error).message }
+          : { msg: err instanceof Error ? err.message : "erro" },
       });
     } catch {
       /* auditoria do erro é best-effort */
+    }
+    if (quedaHinova) {
+      return NextResponse.json(
+        {
+          error:
+            "O sistema da Hinova (SGA) não respondeu agora. A falha é lá, não no app — tente novamente em alguns segundos.",
+          fonte: "hinova",
+        },
+        { status: 503 },
+      );
     }
     return NextResponse.json({ error: "falha ao consultar" }, { status: 502 });
   }

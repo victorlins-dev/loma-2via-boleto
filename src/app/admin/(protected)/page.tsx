@@ -22,7 +22,8 @@ type Row = {
   result: string;
   recordsReturned: number | null;
   sourceIp: string | null;
-  metadata: { motivo?: string } | null;
+  // `fonte: "hinova"` marca queda do SGA (ver resultadoDetalhado); `motivo` serve aos dois casos.
+  metadata: { motivo?: string; fonte?: string } | null;
 };
 
 type Cursor = { eventTime: string; id: number } | null;
@@ -56,6 +57,13 @@ const MOTIVO_LABEL: Record<string, string> = {
   sem_faturas: "Sem boleto no período consultável",
 };
 function resultadoDetalhado(r: Pick<Row, "result" | "metadata">): string {
+  // Queda da Hinova entra como `erro` (pra taxa de erro continuar certa) com a causa no metadata.
+  // Mostrar isso aqui é o que permite medir a frequência das quedas do SGA sem abrir o banco.
+  if (r.result === "erro" && r.metadata?.fonte === "hinova") {
+    const MOTIVO: Record<string, string> = { "5xx": "erro no servidor", timeout: "não respondeu no prazo", rede: "conexão caiu" };
+    const m = r.metadata?.motivo ? MOTIVO[String(r.metadata.motivo)] : null;
+    return m ? `Hinova fora do ar (${m})` : "Hinova fora do ar";
+  }
   if (r.result === "nao_encontrado") {
     const motivo = r.metadata?.motivo ? MOTIVO_LABEL[r.metadata.motivo] : null;
     return motivo ? `Não encontrado: ${motivo}` : "Não encontrado";

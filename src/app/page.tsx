@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
-import { Search, Download, Copy, Check, Loader2, AlertCircle, CreditCard, FileText, Car, ChevronRight, ShieldCheck, ShieldAlert, Wallet, Siren, CalendarClock, CheckCircle2 } from "lucide-react";
+import { Search, Download, Copy, Check, Loader2, AlertCircle, CreditCard, FileText, Car, ChevronRight, ShieldCheck, ShieldAlert, Wallet, Siren, CalendarClock, CheckCircle2, ServerCrash } from "lucide-react";
 
 type Fatura = {
   nossoNumero: string | null;
@@ -165,6 +165,10 @@ export default function Home() {
   const [placa, setPlaca] = useState("");
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  // Queda da Hinova é avisada com destaque próprio (pedido do Victor 31/07/2026: "o SGA cai muitas
+  // vezes, SEMPRE que identificar que a Hinova caiu precisamos avisar"). Sem isso o executivo lê
+  // "falha ao consultar" e acha que o app quebrou.
+  const [quedaHinova, setQuedaHinova] = useState(false);
   const [res, setRes] = useState<Resultado | null>(null);
   const [copiado, setCopiado] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -181,10 +185,13 @@ export default function Home() {
   }, [res, erro, loading]);
 
   // placaOverride: quando o executivo escolhe uma placa no seletor.
+  // cpfOverride: usado pelo "tentar de novo" da queda da Hinova — os campos são zerados depois de
+  // consultar, então repetir a busca precisa dos valores guardados em `buscado`, não do estado.
   const consultar = useCallback(
-    async (placaOverride?: string) => {
+    async (placaOverride?: string, cpfOverride?: string) => {
       setErro(null);
-      const cpfDigits = cpf.replace(/\D/g, "");
+      setQuedaHinova(false);
+      const cpfDigits = (cpfOverride ?? cpf).replace(/\D/g, "");
       const placaUsar = (placaOverride ?? placa).trim();
       const temCpf = cpfDigits.length === 11;
       const temPlaca = placaUsar.length >= 5;
@@ -213,6 +220,7 @@ export default function Home() {
         });
         const data = await r.json();
         if (!r.ok) {
+          if (data?.fonte === "hinova") setQuedaHinova(true);
           setErro(data?.error || "Não foi possível consultar.");
           return;
         }
@@ -311,9 +319,31 @@ export default function Home() {
               {loading ? "Consultando…" : "Consultar faturas"}
             </button>
 
-            {erro && (
+            {erro && !quedaHinova && (
               <div className="flex items-center gap-2 text-red text-sm bg-red-soft/20 rounded-xl p-3">
                 <AlertCircle className="w-4 h-4 shrink-0" /> {erro}
+              </div>
+            )}
+
+            {/* Queda da Hinova: aviso próprio, dizendo de quem é a falha. O SGA cai com frequência e
+                o executivo não pode achar que o app quebrou nem abrir chamado no lugar errado. */}
+            {quedaHinova && (
+              <div className="flex gap-3 items-start bg-third/10 border border-third/40 rounded-xl p-4">
+                <ServerCrash className="w-5 h-5 text-third shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold text-graphite text-sm">Sistema da Hinova (SGA) fora do ar</p>
+                  <p className="text-sm text-gray-text mt-1">
+                    A consulta não foi respondida pelo sistema da Hinova. <span className="font-semibold">A falha é
+                    lá, não no app.</span> Espere alguns segundos e consulte de novo — normalmente volta rápido.
+                  </p>
+                  <button
+                    onClick={() => consultar(buscado.placa || undefined, buscado.cpf || undefined)}
+                    disabled={loading}
+                    className="mt-3 px-4 py-2 rounded-xl font-bold text-xs uppercase tracking-wider text-graphite bg-third/25 hover:bg-third/40 transition-all disabled:opacity-50"
+                  >
+                    Tentar de novo
+                  </button>
+                </div>
               </div>
             )}
           </div>
