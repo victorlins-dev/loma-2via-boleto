@@ -60,8 +60,15 @@ export type Fatura = {
   nossoNumero: string | null;
   valor: string | null;
   vencimento: string | null;
+  /** Data em que o SGA gerou o boleto (`data_emissao`). Na Loma a geração é em massa, por volta do
+   *  dia 23, vencendo dia 10 do mês seguinte — ver a data de geração explica na hora por que uma
+   *  fatura "nova" tem vencimento no mês que vem. */
+  emissao: string | null;
   situacao: string | null;
   pago: boolean;
+  /** Cobrável: situação ABERTO no catálogo oficial do SGA (código 2 — o único que a Hinova conta
+   *  como inadimplência). É o que vai no bloco destacado da tela. */
+  aberto: boolean;
   linhaDigitavel: string | null;
   linkBoleto: string | null;
   pixCopiaCola: string | null;
@@ -203,27 +210,51 @@ export async function buscarSituacaoAssociado(cpfOuCnpj: string): Promise<Situac
   };
 }
 
+// CATÁLOGO OFICIAL de situação de boleto (GET listar/situacao-boleto/todos, lido em 31/07/2026 —
+// rota liberada pelo Victor na tela do SGA). Só o código 2 é cobrável:
+//   1 BAIXADO (pago=SIM) · 2 ABERTO (pago=NÃO, considerado_inadimplencia=Y) · 3 CANCELADO ·
+//   4 BAIXADO C/ PENDÊNCIA (pago=SIM) · 555 CANCELADO REATIVAÇÃO · 666 CANCELADO TRATATIVA
+//   COMERCIAL · 777 CANCELADO BOLETO INDEVIDO · 999 EXCLUÍDO · 1000 CANCELADO REATIVAÇÃO INADIM.
+// ⚠️ Antes disto classificávamos por PALAVRA na descrição, e EXCLUÍDO passava como "em aberto".
+// O código é a fonte oficial — a descrição só entra como plano B.
+const CODIGO_SITUACAO_ABERTO = "2";
+const SITUACAO_NAO_COBRAVEL = /(BAIXAD|PAGO|LIQUIDAD|QUITAD|CANCELAD|ESTORNAD|EXCLU)/;
+
 function pickFatura(row: Record<string, unknown>): Fatura {
   const situacao = normalizeText(readStr(row, ["situacao_boleto", "status"]));
+  const codigoSituacao = readStr(row, ["codigo_situacao_boleto"]);
   const pago = !!(readStr(row, ["data_pagamento"]) || situacao.includes("PAGO"));
   const pix = (row.pix && typeof row.pix === "object" ? row.pix : {}) as Record<string, unknown>;
   return {
     nossoNumero: readStr(row, ["nosso_numero", "codigo_boleto"]) || null,
     valor: readStr(row, ["valor_boleto", "valor", "total_boleto"]) || null,
     vencimento: readStr(row, ["data_vencimento", "data_vencimento_original"]) || null,
+    emissao: readStr(row, ["data_emissao"]) || null,
     situacao: readStr(row, ["descricao_situacao_boleto", "situacao_boleto", "status"]) || null,
     pago,
+    // O código vem nas listagens E no `buscar/boleto/:nosso_numero` (esse devolve o código mas
+    // NÃO a descrição — conferido ao vivo em 31/07/2026: boleto pago volta código 1 com
+    // situacao_boleto null). A descrição é só plano B, se algum dia vier payload sem código.
+    aberto: codigoSituacao
+      ? codigoSituacao === CODIGO_SITUACAO_ABERTO
+      : !pago && !SITUACAO_NAO_COBRAVEL.test(situacao),
     linhaDigitavel: readStr(row, ["linha_digitavel"]) || null,
     linkBoleto: urlOnly(readStr(row, ["link_boleto"])),
     pixCopiaCola: readStr(pix, ["copia_cola", "copiaCola"]) || null,
   };
 }
 
-function parseBrDate(s: string | null): number {
+/** Data de boleto → timestamp. O SGA responde em ISO (`2026-08-10`) na listagem, mas os payloads
+ *  antigos apareciam em dd/MM/yyyy — aceita OS DOIS.
+ *  ⚠️ Isto já quebrou a ordenação uma vez (31/07/2026): lendo só dd/MM/yyyy, TODA fatura virava
+ *  timestamp 0, o sort não ordenava nada e o corte das "3 últimas" podia descartar a mais nova. */
+export function parseDataFatura(s: string | null): number {
   if (!s) return 0;
-  const m = String(s).match(/(\d{2})\/(\d{2})\/(\d{4})/);
-  if (!m) return 0;
-  return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])).getTime();
+  const iso = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])).getTime();
+  const br = String(s).match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (br) return new Date(Number(br[3]), Number(br[2]) - 1, Number(br[1])).getTime();
+  return 0;
 }
 
 export type ListagemBoletos = {
@@ -231,17 +262,25 @@ export type ListagemBoletos = {
   debug: { attempts: { via: string; n: number }[]; sampleKeys: string[] };
 };
 
-/** As N últimas faturas (histórico), mais recentes primeiro.
- *  ⚠️ O endpoint /listar/boleto-associado-veiculo tem LIMITE DE 90 DIAS por intervalo (doc oficial).
- *  Por isso varremos em JANELAS de ~90 dias andando pra trás (~12 meses = 4 janelas). Antes era
- *  SEQUENCIAL (até 12 chamadas em fila → ~15s no pior caso, conta no cartão). Agora as janelas de
- *  cada varredura vão EM PARALELO (lote pequeno = nº de janelas ~4). A doc da SGA não declara limite
- *  de requisições, então mantemos o paralelismo conservador. `link_boleto: true` traz o PDF na listagem. */
-const FATURA_JANELAS = 4; // ~12 meses (4 x ~90 dias) — cobre as 3 últimas faturas com folga
+/** Todas as faturas achadas na varredura, VENCIMENTO MAIS RECENTE PRIMEIRO (quem chama decide o corte).
+ *  ⚠️ O endpoint /listar/boleto-associado-veiculo exige um par de datas e tem LIMITE DE 90 DIAS por
+ *  intervalo (doc oficial). Por isso varremos em JANELAS CONTÍGUAS de 88 dias andando pra trás.
+ *  Cobertura total: 40 dias pra FRENTE + ~10 meses pra trás (4 x 88 dias). Quem depende desse
+ *  período pra afirmar algo na tela tem que usar o MESMO número — ver boleto.service.ts.
+ *  As janelas vão EM PARALELO (lote pequeno = nº de janelas). A doc da SGA não declara
+ *  limite de requisições, então mantemos o paralelismo conservador. `link_boleto: true` traz o PDF.
+ *
+ *  ⚠️ A JANELA OLHA PRA FRENTE — e isso é o coração da correção de 31/07/2026. A Loma gera o boleto
+ *  por volta do dia 23 com vencimento no dia 10 do mês SEGUINTE, ou seja a fatura nasce ~18 dias no
+ *  futuro. Com o antigo `+3 dias` de folga, do dia 23 até o dia 10 seguinte a fatura nova ficava
+ *  FORA da janela e o app não a mostrava — 18 dias invisíveis por mês, todo mês (provado ao vivo na
+ *  placa HEM0A76: boleto 752459, emitido 23/07/2026, vencendo 10/08/2026, invisível em 31/07). */
+const FATURA_JANELAS = 4; // ~10 meses pra trás (4 x 88 dias)
+const JANELA_DIAS = 88; // < limite de 90 dias por consulta
+const LOOKAHEAD_DIAS = 40; // cobre o vencimento do dia 10 do mês seguinte com folga
 export async function listarUltimasFaturas(
   placa: string,
   codigo: string | null,
-  n = 3,
 ): Promise<ListagemBoletos> {
   const p = String(placa).replace(/\s/g, "").toUpperCase();
   const DAY = 864e5;
@@ -252,8 +291,9 @@ export async function listarUltimasFaturas(
     // Todas as janelas em PARALELO (lote de FATURA_JANELAS ~4).
     const lotes = await Promise.all(
       Array.from({ length: FATURA_JANELAS }, async (_, i) => {
-        const fim = new Date(Date.now() - i * 90 * DAY + 3 * DAY); // +3d no + recente pega o vincendo
-        const ini = new Date(fim.getTime() - 88 * DAY); // 88 dias < limite de 90
+        // Janelas contíguas: o fim de uma é o início da anterior (sem buraco entre elas).
+        const fim = new Date(Date.now() + (LOOKAHEAD_DIAS - i * JANELA_DIAS) * DAY);
+        const ini = new Date(fim.getTime() - JANELA_DIAS * DAY);
         const body = {
           ...ident,
           data_vencimento_inicial: fmtBr(ini),
@@ -284,8 +324,7 @@ export async function listarUltimasFaturas(
   const sampleKeys = allRows[0] ? Object.keys(allRows[0]) : [];
   const faturas = allRows
     .map(pickFatura)
-    .sort((a, b) => parseBrDate(b.vencimento) - parseBrDate(a.vencimento))
-    .slice(0, n);
+    .sort((a, b) => parseDataFatura(b.vencimento) - parseDataFatura(a.vencimento));
   return { faturas, debug: { attempts, sampleKeys } };
 }
 

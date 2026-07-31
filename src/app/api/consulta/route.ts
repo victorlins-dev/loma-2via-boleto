@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const r = await consultarFaturas(cpfArg ?? undefined, placaArg ?? undefined);
-    const records = r.result === "ok" ? r.faturas.length : 0;
+    const records = r.result === "ok" ? r.emAberto.length + r.anteriores.length : 0;
     const target = r.result === "ok" || r.result === "recorrente" || r.result === "selecionar_placa" ? r.codigo : null;
 
     // 3) AUDITORIA — sempre, antes de responder (subproduto obrigatório).

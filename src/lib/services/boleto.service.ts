@@ -15,6 +15,7 @@ import {
   eventoEmAberto,
   situacaoFinanceiraVeiculo,
   ehRecorrenteCartao,
+  parseDataFatura,
   type Fatura,
   type Evento,
 } from "@/lib/clients/sga";
@@ -36,13 +37,17 @@ export type SituacaoInfo = {
   notaAssociado?: string | null;
   notaFinanceira?: string | null;
 };
+// `emAberto` x `anteriores` (31/07/2026): a tela mostra a(s) fatura(s) COBRÁVEIS em destaque, no topo,
+// sem o executivo clicar em nada — era a dor do Victor (no app da Loma a fatura em aberto só aparece
+// depois de abrir "ver todas"). `anteriores` = as já pagas, histórico curto abaixo.
 export type ConsultaResult =
-  | { result: "ok"; associadoNome: string | null; codigo: string | null; placa: string; modelo: string | null; situacao: SituacaoInfo; eventos: Evento[]; faturas: Fatura[] }
+  | { result: "ok"; associadoNome: string | null; codigo: string | null; placa: string; modelo: string | null; situacao: SituacaoInfo; eventos: Evento[]; emAberto: Fatura[]; anteriores: Fatura[] }
   | { result: "selecionar_placa"; associadoNome: string | null; codigo: string | null; veiculos: PlacaOpcao[] }
   | { result: "recorrente"; associadoNome: string | null; codigo: string | null; placa: string; situacao: SituacaoInfo; eventos: Evento[]; mensagem: string }
   | { result: "nao_encontrado"; motivo: "associado" | "placa" | "sem_faturas"; associadoNome?: string | null; placa?: string; situacao?: SituacaoInfo; eventos?: Evento[]; debug?: unknown };
 
 const MAX_EVENTOS = 5;
+const MAX_ANTERIORES = 3; // histórico curto de faturas já pagas, abaixo do bloco em aberto
 
 function fmtBrDate(d: Date): string {
   return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
@@ -86,13 +91,30 @@ async function porPlaca(
     .sort((a, b) => (b.data || "").localeCompare(a.data || ""))
     .slice(0, MAX_EVENTOS);
 
-  const { faturas } = await listarUltimasFaturas(p, info?.codigo ?? null, 3);
-  if (faturas.length) {
+  const { faturas: todas } = await listarUltimasFaturas(p, info?.codigo ?? null);
+
+  // Faturas COBRÁVEIS. Rede de segurança: a situação financeira do veículo (`sf`, já consultada
+  // acima, sem custo extra) aponta o boleto em aberto SEM depender de janela de data nenhuma.
+  // Se ele não caiu na varredura — vencimento além do lookahead, ou inadimplente antigo com boleto
+  // fora do ~1 ano varrido — buscamos ele direto pelo nosso_numero. Custa 1 chamada e SÓ nesse caso.
+  const emAberto = todas.filter((f) => f.aberto);
+  if (sf?.nossoNumero && !todas.some((f) => f.nossoNumero === sf.nossoNumero)) {
+    const det = await buscarBoleto(sf.nossoNumero);
+    if (det?.aberto) emAberto.push(det);
+  }
+  // Em aberto: vencimento MAIS PRÓXIMO primeiro (a que o associado tem que pagar agora).
+  // Na prática a Loma é PÓS-PAGA (reunião com a Amanda/cobrança, 30/07/2026): enquanto o associado
+  // está inadimplente do mês, o SGA NÃO gera boleto novo — então o normal é existir UMA só em aberto.
+  // A lista continua suportando N por segurança (não quero esconder dívida se aparecer mais de uma).
+  emAberto.sort((a, b) => parseDataFatura(a.vencimento) - parseDataFatura(b.vencimento));
+  const anteriores = todas.filter((f) => !f.aberto).slice(0, MAX_ANTERIORES);
+
+  if (emAberto.length || anteriores.length) {
     // A listagem nem sempre traz o link do PDF (link_boleto) — enriquece cada fatura pelo
     // endpoint de boleto individual (linha digitável + link PDF + PIX numa chamada). Em PARALELO
-    // (até 3 faturas de uma vez) em vez de uma por vez, pra não somar latência.
+    // (todas de uma vez) em vez de uma por vez, pra não somar latência.
     await Promise.all(
-      faturas.map(async (f) => {
+      [...emAberto, ...anteriores].map(async (f) => {
         if (f.nossoNumero && (!f.linkBoleto || !f.linhaDigitavel || !f.pixCopiaCola)) {
           const det = await buscarBoleto(f.nossoNumero);
           if (det) {
@@ -111,7 +133,8 @@ async function porPlaca(
       modelo: info?.modelo ?? null,
       situacao,
       eventos,
-      faturas,
+      emAberto,
+      anteriores,
     };
   }
 
@@ -129,11 +152,13 @@ async function porPlaca(
   }
   // Não é cartão — mostra situação/eventos mesmo sem fatura na janela (associado pode ter
   // boleto real em aberto fora do período consultável; a situação financeira já denuncia isso).
-  // Nenhum boleto em ~12 meses (listarUltimasFaturas varre 4 janelas de ~90 dias) + INADIMPLENTE
+  // Nenhum boleto em ~10 meses (listarUltimasFaturas varre 4 janelas de 88 dias) + INADIMPLENTE
   // = seguro afirmar "há mais de 6 meses" (limiar de negócio antes de virar venda nova).
+  // ⚠️ O texto abaixo tem que refletir o período REALMENTE varrido — se mexer nas janelas do
+  // cliente SGA, mexe aqui também, senão o app afirma pro executivo um período que não consultou.
   const inadimplenteSemHistorico = (situacao.financeira || "").toUpperCase().includes("INADIMPL");
   const situacaoComNota: SituacaoInfo = inadimplenteSemHistorico
-    ? { ...situacao, notaFinanceira: "há mais de 6 meses sem boleto (nenhum encontrado nos últimos ~12 meses consultados)" }
+    ? { ...situacao, notaFinanceira: "há mais de 6 meses sem boleto (nenhum encontrado nos últimos ~10 meses consultados)" }
     : situacao;
   return { result: "nao_encontrado", motivo: "sem_faturas", associadoNome: info?.nome ?? null, placa: p, situacao: situacaoComNota, eventos };
 }
