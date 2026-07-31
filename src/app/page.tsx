@@ -262,7 +262,9 @@ export default function Home() {
   return (
     <div ref={containerRef} className="min-h-screen">
       <header className="bg-primary sticky top-0 z-50 flex justify-center items-center h-24 shadow-sm">
-        <Image src="/logo.webp" alt="Loma" width={160} height={32} priority />
+        {/* Em px, então NÃO acompanha a base rem — reduzido junto com a escala da interface
+            (31/07/2026), senão a logo ficava desproporcional no header. */}
+        <Image src="/logo.webp" alt="Loma" width={128} height={26} priority />
       </header>
 
       <main className="container mx-auto px-4 py-10">

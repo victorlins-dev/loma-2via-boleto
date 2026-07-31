@@ -23,11 +23,14 @@
   --font-sans: var(--font-poppins), ui-sans-serif, system-ui, sans-serif;
 }
 
-/* Dentro do iframe do Bitrix os elementos ficavam pequenos. Subimos a base rem: como
-   Tailwind dimensiona tudo (fontes, paddings, gaps, raios) em rem, isso amplia a interface
-   INTEIRA de forma proporcional, sem desalinhar nada. */
+/* ESCALA DA INTERFACE. Tailwind dimensiona tudo (fontes, paddings, gaps, raios) em rem, então
+   mexer na base rem escala a interface INTEIRA de forma proporcional, sem desalinhar nada.
+   Histórico: começou em 16px, foi pra 18px porque no iframe do Bitrix parecia pequeno — e passou
+   do ponto (31/07/2026: "zoom no iframe tá muito grande"). O Victor validou a tela com o zoom do
+   navegador em 80%, que sobre 18px dá exatamente 14.4px. É esse o número aqui.
+   ⚠️ Isto é GLOBAL: vale também pro painel /admin e pra /install. */
 html {
-  font-size: 18px;
+  font-size: 14.4px;
 }
 
 body {
