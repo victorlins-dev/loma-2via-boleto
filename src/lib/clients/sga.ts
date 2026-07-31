@@ -114,9 +114,16 @@ function fmtBr(d: Date): string {
  *  que o app estava quebrado — e nós fomos caçar bug no lugar errado. Quem trata este erro TEM que
  *  dizer na tela que a queda é da Hinova. */
 export class SgaIndisponivelError extends Error {
-  constructor(readonly motivo: "5xx" | "timeout" | "rede", readonly detalhe: string) {
+  // ⚠️ Campos declarados e atribuídos NA MÃO de propósito. `constructor(readonly motivo: ...)`
+  // (parameter property) é sintaxe só-do-TypeScript e o `node --test` roda em strip-only mode,
+  // onde isso é erro de sintaxe — quebrou a suíte do portal do associado em 31/07/2026.
+  readonly motivo: "5xx" | "timeout" | "rede";
+  readonly detalhe: string;
+  constructor(motivo: "5xx" | "timeout" | "rede", detalhe: string) {
     super(`SGA indisponível (${motivo}): ${detalhe}`);
     this.name = "SgaIndisponivelError";
+    this.motivo = motivo;
+    this.detalhe = detalhe;
   }
 }
 

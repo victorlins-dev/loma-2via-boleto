@@ -21,6 +21,12 @@ const IS_PROD = process.env.NODE_ENV === "production";
 // Modo DEV blindado: só vale FORA de produção (mesmo que a env vaze pra Vercel, não abre).
 const DEV_NO_AUTH = process.env.ALLOW_DEV_NO_AUTH === "1" && !IS_PROD;
 
+// SIMULAR A QUEDA DA HINOVA, de dentro do Bitrix, sem env nova e sem deploy: basta consultar esta
+// "placa". Devolve exatamente a mesma resposta de uma queda real, então serve pra conferir a tela.
+// Fica DEPOIS da validação de sessão do Bitrix — quem não está logado no portal não alcança.
+// Não polui a medição: é auditado como `erro_simulado`, e a taxa de erro do painel só conta `erro`.
+const PLACA_SIMULA_QUEDA_SGA = "SGAOFF";
+
 export async function POST(req: NextRequest) {
   let body: { auth?: { access_token?: string; domain?: string; member_id?: string }; cpf?: string; placa?: string };
   try {
@@ -67,6 +73,34 @@ export async function POST(req: NextRequest) {
   const ua = req.headers.get("user-agent");
   const cpfArg = temCpf ? cpf : null;
   const placaArg = temPlaca ? placa : null;
+
+  // Simulação da queda da Hinova (ver PLACA_SIMULA_QUEDA_SGA). Responde igual a uma queda real,
+  // mas SEM tocar no SGA — dá pra testar a tela mesmo com a Hinova funcionando perfeitamente.
+  if (placa === PLACA_SIMULA_QUEDA_SGA) {
+    try {
+      await registrarConsulta({
+        actorUserId: user.id,
+        actorNome: user.nome,
+        action: "CONSULTA_2A_VIA",
+        cpf: null,
+        placa: placaArg,
+        result: "erro_simulado",
+        sourceIp: ip,
+        userAgent: ua,
+        metadata: { fonte: "hinova", motivo: "5xx", simulado: true },
+      });
+    } catch {
+      /* auditoria da simulação é best-effort */
+    }
+    return NextResponse.json(
+      {
+        error:
+          "O sistema da Hinova (SGA) não respondeu agora. A falha é lá, não no app — tente novamente em alguns segundos.",
+        fonte: "hinova",
+      },
+      { status: 503 },
+    );
+  }
 
   try {
     const r = await consultarFaturas(cpfArg ?? undefined, placaArg ?? undefined);

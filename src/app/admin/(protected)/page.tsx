@@ -49,6 +49,7 @@ const RESULT_BADGE: Record<string, string> = {
   nao_encontrado: "bg-gray-soft text-gray-text",
   negado: "bg-red-soft/30 text-red",
   erro: "bg-red-soft/30 text-red",
+  erro_simulado: "bg-gray-soft text-gray-text", // teste nosso, não incidente: tom neutro
   selecionar_placa: "bg-secondary/15 text-secondary",
 };
 const MOTIVO_LABEL: Record<string, string> = {
@@ -57,6 +58,8 @@ const MOTIVO_LABEL: Record<string, string> = {
   sem_faturas: "Sem boleto no período consultável",
 };
 function resultadoDetalhado(r: Pick<Row, "result" | "metadata">): string {
+  // Teste feito de propósito com a placa de simulação — nunca contar como incidente real.
+  if (r.result === "erro_simulado") return "Simulação de queda da Hinova (teste)";
   // Queda da Hinova entra como `erro` (pra taxa de erro continuar certa) com a causa no metadata.
   // Mostrar isso aqui é o que permite medir a frequência das quedas do SGA sem abrir o banco.
   if (r.result === "erro" && r.metadata?.fonte === "hinova") {
@@ -282,6 +285,7 @@ export default function AdminDashboard() {
                 <option value="recorrente">Cartão</option>
                 <option value="nao_encontrado">Não encontrado</option>
                 <option value="erro">Erro</option>
+                <option value="erro_simulado">Simulação de queda (teste)</option>
               </select>
             </div>
             <button onClick={() => carregar(false)} disabled={loading} className="py-2.5 px-4 rounded-xl font-bold text-white bg-primary hover:bg-black transition-all flex items-center gap-2 text-sm">
